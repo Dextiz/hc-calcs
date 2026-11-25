@@ -1,0 +1,44 @@
+plugins {
+    id 'java'
+}
+
+group = 'se.sandr.hccalcs'
+version = '0.2.10'
+
+repositories {
+    maven {
+        url = 'https://repo.runelite.net'
+        content { includeGroupByRegex('net\\.runelite.*') }
+    }
+    mavenCentral()
+}
+
+def runeLiteVersion = 'latest.release'
+
+dependencies {
+    compileOnly "net.runelite:client:${runeLiteVersion}"
+    testImplementation "net.runelite:client:${runeLiteVersion}"
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 11
+}
+
+tasks.register('run', JavaExec) {
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'se.sandr.hccalcs.HcCalcsDev'
+    jvmArgs '-ea'
+    args '--developer-mode', '--disable-telemetry'
+    def devHome = layout.buildDirectory.dir('dev-home')
+    systemProperty 'user.home', devHome.get().asFile.absolutePath
+    doFirst { devHome.get().asFile.mkdirs() }
+}
+
+tasks.register('verifyCalculators', JavaExec) {
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'se.sandr.hccalcs.CalculatorChecks'
+    jvmArgs '-Djava.awt.headless=true'
+}
+
+check.dependsOn verifyCalculators
