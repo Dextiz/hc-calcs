@@ -1,4 +1,4 @@
-# HC Calcs
+# HCW Calcs
 
 RuneLite calculators for Hardcore Worlds, based on [hcw.sandr.se](https://hcw.sandr.se/).
 
@@ -14,7 +14,7 @@ Opening the calculators fetches prices directly from the [OSRS Wiki real-time pr
 
 ## Development
 
-Set `JAVA_HOME` to a Java 11 JDK. On Windows, run `.\gradlew.bat build` to compile and verify the calculations, then `.\gradlew.bat run` to start RuneLite with HC Calcs in the sidebar. On Linux and macOS, use `./gradlew`. The developer client uses a separate local profile under `build/dev-home`.
+Set `JAVA_HOME` to a Java 11 JDK. On Windows, run `.\gradlew.bat build` to compile and verify the calculations, then `.\gradlew.bat run` to start RuneLite with HCW Calcs in the sidebar. On Linux and macOS, use `./gradlew`. The developer client uses a separate local profile under `build/dev-home`.
 
 The calculators use the JSON bundled in this repository. To regenerate it from a local copy of the website source, put the plugin checkout inside the website project and run `node hc-calcs/tools/sync-recipes.cjs` from the website root. Pass `--check` to compare the bundled JSON with the website data.
 
@@ -28,7 +28,3 @@ The bundled JSON tables adapt item and gameplay information from the Old School 
 - [Prayer bones](https://oldschool.runescape.wiki/w/Calculator:Prayer/Bones), [blessed bone shards](https://oldschool.runescape.wiki/w/Blessed_bone_shards), [offering spells](https://oldschool.runescape.wiki/w/Offering_spells), [reanimation spells](https://oldschool.runescape.wiki/w/Reanimation_spells), [Farming seeds](https://oldschool.runescape.wiki/w/Seeds), and [herb yields](https://oldschool.runescape.wiki/w/Calculator:Farming/Herbs).
 - [Ancient Magicks](https://oldschool.runescape.wiki/w/Ancient_Magicks), [chinchompas](https://oldschool.runescape.wiki/w/Chinchompa_(weapon)), [armoured zombies](https://oldschool.runescape.wiki/w/Armoured_zombie_(Zemouregal%27s_Base)), and [maniacal monkeys](https://oldschool.runescape.wiki/w/Maniacal_monkey).
 - [Mastering Mixology](https://oldschool.runescape.wiki/w/Mastering_Mixology/Strategies), [NMZ rewards](https://oldschool.runescape.wiki/w/Dom_Onion%27s_Reward_Shop), [herb boxes](https://oldschool.runescape.wiki/w/Herb_box), and [Miscellania loot](https://oldschool.runescape.wiki/w/Calculator:Miscellania_loot).
-
-## Availability
-
-HC Calcs currently runs as a developer plugin. It is awaiting submission to the RuneLite Plugin Hub.

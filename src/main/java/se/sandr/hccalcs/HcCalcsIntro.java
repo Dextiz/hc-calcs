@@ -15,7 +15,7 @@ import net.runelite.client.util.ImageUtil;
 
 final class HcCalcsIntro extends JPanel
 {
-    static final String VERSION = "0.2.10";
+    static final String VERSION = "0.2.11";
     private static final int TEXT_WIDTH = 176;
     private final JButton open = new JButton("Open calculators");
 
@@ -24,7 +24,7 @@ final class HcCalcsIntro extends JPanel
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
         setBorder(BorderFactory.createEmptyBorder(12, 8, 12, 8));
 
-        JLabel heading = new JLabel("Welcome to HC Calcs");
+        JLabel heading = new JLabel("Welcome to HCW Calcs");
         heading.setFont(heading.getFont().deriveFont(Font.BOLD, 17f));
         heading.setForeground(XpResults.GOLD);
         addCentered(heading);
@@ -54,10 +54,8 @@ final class HcCalcsIntro extends JPanel
         label.setAlignmentX(Component.LEFT_ALIGNMENT);
         notes.add(label);
         notes.add(Box.createVerticalStrut(8));
-        JLabel updates = copy("• The mascot has a beige shirt<br>"
-            + "• Welcome screen and patch notes<br>"
-            + "• Results show up to one decimal<br>"
-            + "• HCW prices come directly from the OSRS Wiki", false);
+        JLabel updates = copy("• New name, HCW Calcs<br>"
+            + "• High Alchemy respects daily buy-volume limits", false);
         updates.setAlignmentX(Component.LEFT_ALIGNMENT);
         notes.add(updates);
         addCentered(notes);

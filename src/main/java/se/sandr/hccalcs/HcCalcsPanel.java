@@ -128,7 +128,7 @@ final class HcCalcsPanel extends PluginPanel
         trainingControls.setLayout(new BoxLayout(trainingControls, BoxLayout.Y_AXIS));
         trainingResults.setLayout(new BoxLayout(trainingResults, BoxLayout.Y_AXIS));
 
-        JLabel heading = new JLabel("HC Calcs");
+        JLabel heading = new JLabel("HCW Calcs");
         heading.setFont(heading.getFont().deriveFont(18f));
         heading.setForeground(GOLD);
         heading.setAlignmentX(Component.LEFT_ALIGNMENT);

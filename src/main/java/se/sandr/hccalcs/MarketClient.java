@@ -22,7 +22,7 @@ import okhttp3.ResponseBody;
 final class MarketClient
 {
     private static final String WIKI_API = "https://prices.runescape.wiki/api/v2/osrs-hc";
-    private static final String USER_AGENT = "HC Calcs (RuneLite Hardcore Worlds calculator)";
+    private static final String USER_AGENT = "HCW Calcs (RuneLite Hardcore Worlds calculator)";
     static final long REFRESH_SECONDS = 30 * 60;
     static final long MANUAL_COOLDOWN_SECONDS = 60;
     private final OkHttpClient http;

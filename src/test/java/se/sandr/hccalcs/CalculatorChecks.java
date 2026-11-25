@@ -94,7 +94,7 @@ public final class CalculatorChecks
                 System.out.println("Live HCW price and volume payloads verified");
             }
         }
-        System.out.println("HC Calcs checks passed for " + recipes + " training recipes");
+        System.out.println("HCW Calcs checks passed for " + recipes + " training recipes");
         UtilityChecks.verify(args);
         verifyMarketRequests();
     }
@@ -136,7 +136,7 @@ public final class CalculatorChecks
                 request.url().isHttps() && request.url().host().equals("prices.runescape.wiki")
                     && payloads.containsKey(request.url().encodedPath()) && request.url().query() == null
                     && request.method().equals("GET") && request.body() == null
-                    && request.header("User-Agent").startsWith("HC Calcs")),
+                    && request.header("User-Agent").startsWith("HCW Calcs")),
                 "Public HCW requests go directly to the Wiki and carry the plugin's User-Agent");
         }
         finally

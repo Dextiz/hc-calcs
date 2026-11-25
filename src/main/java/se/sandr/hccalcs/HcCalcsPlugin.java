@@ -24,7 +24,7 @@ import net.runelite.client.util.ImageUtil;
 import okhttp3.OkHttpClient;
 
 @PluginDescriptor(
-    name = "HC Calcs",
+    name = "HCW Calcs",
     description = "Hardcore Worlds training, combat, and reward calculators",
     tags = {"hardcore", "skilling", "calculator", "prices"}
 )
@@ -53,7 +53,7 @@ public class HcCalcsPlugin extends Plugin
             this::importCombatLoadout);
         panel = view;
         navigation = NavigationButton.builder()
-            .tooltip("HC Calcs")
+            .tooltip("HCW Calcs")
             .icon(ImageUtil.loadImageResource(HcCalcsPlugin.class, "/hc-calcs-icon.png"))
             .priority(12)
             .panel(view)

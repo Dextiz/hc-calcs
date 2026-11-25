@@ -3,7 +3,7 @@ plugins {
 }
 
 group = 'se.sandr.hccalcs'
-version = '0.2.10'
+version = '0.2.11'
 
 repositories {
     maven {
