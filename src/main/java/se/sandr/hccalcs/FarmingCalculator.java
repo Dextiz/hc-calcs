@@ -32,21 +32,21 @@ final class FarmingCalculator extends UtilityCalculator
         array(data, "crops").forEach(crop -> categories.add(s(object(crop), "category")));
         choice("category", "Category", ALL, categories.toArray(new String[0]));
         choice("compost", "Compost", "ultra", "none=None", "compost=Compost", "super=Supercompost", "ultra=Ultracompost");
-        flag("protection", "Pay for crop protection", false);
+        flag("protection", "Pay for protection", false);
         trainingFields();
-        number("patches", "Total herb patches", 1, 1, 10);
+        number("patches", "Herb patches", 1, 1, 10);
         choice("kandarin", "Kandarin Diary", "0", "0=None", "10=Medium", "17=Hard", "25=Elite");
         choice("sell", "Herb output", "grimy", "grimy=Grimy", "clean=Clean", "unfinished=Unfinished potions");
-        flag("fortis", "Civitas illa Fortis patch", false);
+        flag("fortis", "Civitas illa Fortis", false);
         flag("harmony", "Harmony Island patch", false);
         flag("hosidius", "Hosidius patch", false);
         flag("trollheim", "Trollheim patch", false);
         flag("weiss", "Weiss patch", false);
-        flag("kourend", "Hard Kourend & Kebos Diary", false);
+        flag("kourend", "Hard Kourend Diary", false);
         flag("secateurs", "Magic secateurs", false);
         choice("anima", "Anima plant", "none", "none=None", "attas=Attas", "iasor=Iasor");
-        flag("cape", "Farming cape / Max cape", false);
-        flag("bucket", "Bottomless compost bucket", false);
+        flag("cape", "Farming / Max cape", false);
+        flag("bucket", "Bottomless bucket", false);
         flag("resurrect", "Resurrect Crops", false);
         number("magic", "Resurrect Magic (0 = auto)", 0, 0, 99);
         hidden("harvest");
@@ -85,26 +85,33 @@ final class FarmingCalculator extends UtilityCalculator
             double profit = loot - cost;
             double gpPerXp = profit / plan.xp;
             String name = s(crop, "name");
-            String detail = name + " · " + group + "\nLevel " + required + "\n"
-                + "Harvest/patch " + fmt(plan.quantity) + "\n"
-                + (Double.isFinite(plan.average) && crop.has("harvestRoll") ? "Average harvest " + fmt(plan.average) + "\n" : "")
-                + (herb ? "Herbs/run " + fmt(plan.quantity * plan.patches) + " · " + percent(plan.loss) + " crop loss\n" : "")
-                + (herb && !Double.isFinite(plan.quantity) ? "Check patch and resurrection settings.\n" : "")
-                + "\n" + fmt(plan.xp) + " XP/patch\nBuy " + gp(cost) + " · Loot " + gp(loot)
-                + "\nProfit/patch " + gp(profit) + (herb ? "\nProfit/run " + gp(profit * plan.patches) : "")
+            String detail = "Buy " + gp(cost) + " · Loot " + gp(loot) + "\n"
+                + (Double.isFinite(plan.average) && plan.average != plan.quantity ? "Default harvest " + fmt(plan.average) + "\n" : "")
+                + (herb && Double.isFinite(plan.quantity)
+                    ? "Herbs/run " + fmt(plan.quantity * plan.patches) + " · " + percent(plan.loss) + " crop loss\n" : "")
                 + "\n\nInputs\n" + itemLines(plan.inputs, market::buy)
                 + (plan.outputs.isEmpty() ? "" : "\nHarvest sale\n" + itemLines(plan.outputs, market::sell));
-            long actions = goalActions(values, required, plan.xp);
-            if (actions > 0)
-                detail += "\nTo goal\n" + fmt(actions) + " patches\nBuy " + gp(cost * actions)
-                    + "\nNet cost " + gp(-profit * actions);
             Row row = new Row(name, required + "  " + name + " · " + gp(profit), detail, plan.outputs)
                 .training(required, plan.xp, gpPerXp, cost).rate(-gpPerXp);
+            long actions = goalActions(values, required, plan.xp);
+            if (actions > 0) row.goal = new TrainingCalculator.Goal(actions, cost * actions, -profit * actions);
+            row.summary = farmSummary(plan, herb, profit);
             if (!herb && !crop.get("product").isJsonNull()) row.itemId = seed.id();
             rows.add(row);
         }
         rows.sort(trainingOrder(values));
         return rows;
+    }
+
+    private static String farmSummary(CropPlan plan, boolean herb, double profit)
+    {
+        if (herb && !Double.isFinite(plan.quantity)) return "Check herb patches and Resurrect Crops in Setup.";
+        StringBuilder summary = new StringBuilder(signedGp(profit)).append("/patch");
+        if (!plan.outputs.isEmpty() && Double.isFinite(plan.quantity))
+            summary.append(" · ").append(fmt(plan.quantity)).append(herb ? " herbs" : " harvest");
+        if (herb && plan.patches > 1)
+            summary.append("\n").append(signedGp(profit * plan.patches)).append("/run · ").append(plan.patches).append(" patches");
+        return summary.toString();
     }
 
     @Override

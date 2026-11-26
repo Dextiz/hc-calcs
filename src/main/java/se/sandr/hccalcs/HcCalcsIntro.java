@@ -15,7 +15,7 @@ import net.runelite.client.util.ImageUtil;
 
 final class HcCalcsIntro extends JPanel
 {
-    static final String VERSION = "0.2.12";
+    static final String VERSION = "0.2.13";
     private static final int TEXT_WIDTH = 176;
     private final JButton open = new JButton("Open calculators");
 
@@ -54,8 +54,9 @@ final class HcCalcsIntro extends JPanel
         label.setAlignmentX(Component.LEFT_ALIGNMENT);
         notes.add(label);
         notes.add(Box.createVerticalStrut(8));
-        JLabel updates = copy("• Runecrafting with pouch and hourly estimates<br>"
-            + "• Level or Exact XP on every skill calculator", false);
+        JLabel updates = copy("• Edit your level, XP and goal directly<br>"
+            + "• See goal costs when you select a method<br>"
+            + "• Quick herb settings and Prayer methods", false);
         updates.setAlignmentX(Component.LEFT_ALIGNMENT);
         notes.add(updates);
         addCentered(notes);

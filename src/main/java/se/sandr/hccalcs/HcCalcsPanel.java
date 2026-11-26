@@ -1,12 +1,13 @@
 package se.sandr.hccalcs;
 
 import static se.sandr.hccalcs.UtilityCalculator.fmt;
+import static se.sandr.hccalcs.UtilityCalculator.signedGp;
 
 import java.awt.BorderLayout;
-import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.GridLayout;
+import java.awt.Insets;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
@@ -62,11 +63,8 @@ final class HcCalcsPanel extends PluginPanel
     private static final String CONFIG_GROUP = "hccalcs";
     private static final String SEEN_INTRO = "seenIntroVersion";
     private static final String ALL = "All categories";
-    private static final Color GOLD = new Color(241, 199, 104);
     private static final DateTimeFormatter PRICE_TIME =
         DateTimeFormatter.ofPattern("MMM d HH:mm", Locale.ENGLISH).withZone(ZoneId.systemDefault());
-    private static final DateTimeFormatter SHORT_PRICE_TIME =
-        DateTimeFormatter.ofPattern("HH:mm", Locale.ENGLISH).withZone(ZoneId.systemDefault());
     private static final DateTimeFormatter VOLUME_DATE = DateTimeFormatter.ISO_LOCAL_DATE.withZone(ZoneOffset.UTC);
     private final Map<String, RecipeCatalog> catalogs;
     private final MarketClient marketClient;
@@ -75,13 +73,15 @@ final class HcCalcsPanel extends PluginPanel
     private final HcCalcsIntro intro;
     private final JComboBox<Object> skill = new JComboBox<>();
     private final SkillProgressInput progressInput;
+    private final JToggleButton filtersButton = new JToggleButton("Filters");
+    private final JPanel viewControls = new JPanel(new BorderLayout(6, 0));
     private final JPanel trainingControls = new JPanel();
     private final JPanel trainingResults = new JPanel();
     private final UtilityPanel utilities;
     private final JComboBox<String> category = new JComboBox<>();
+    private final JPanel categoryControl = labeled("Category", category);
     private final JComboBox<String> sort = new JComboBox<>(new String[]{"Level", "Best GP/XP", "Highest XP/action"});
     private final JCheckBox onlyAvailable = new JCheckBox("Only show recipes I can use");
-    private final JSpinner goal = new JSpinner(new SpinnerNumberModel(0, 0, 99, 1));
     private final JSpinner minimumXp = new JSpinner(new SpinnerNumberModel(0.0, 0.0, 100000.0, 1.0));
     private final JSpinner minimumVolume = new JSpinner(new SpinnerNumberModel(0, 0, Integer.MAX_VALUE, 100));
     private final JComboBox<Amulet> amulet = new JComboBox<>(Amulet.values());
@@ -100,13 +100,15 @@ final class HcCalcsPanel extends PluginPanel
     private final JPanel herbloreOptions = new JPanel();
     private final JPanel cookingOptions = new JPanel();
     private final JPanel runecraftOptions = new JPanel();
-    private final JLabel status = new JLabel("HCW market prices");
-    private final JLabel resultsStatus = new JLabel();
-    private final XpResults.Best bestRate = new XpResults.Best();
-    private final JButton refresh = new JButton("Refresh");
+    private final JButton refresh = new JButton("Prices");
+    private final JToggleButton setupButton = new JToggleButton("Setup");
+    private final JToggleButton detailsButton = new JToggleButton("Details");
+    private final JPanel resultActions = new JPanel(new GridLayout(1, 0, 4, 0));
     private final JButton sell = new JButton("Edit sell price");
     private final DefaultListModel<Row> rows = new DefaultListModel<>();
     private final JList<Row> results = new JList<>(rows);
+    private final JTextArea resultSummary = new JTextArea();
+    private final GoalResult goalResult = new GoalResult();
     private final JTextArea details = new JTextArea();
     private final Timer timer = new Timer(1000, event -> refreshWhenDue());
     private final Map<Integer, Long> overrides = new HashMap<>();
@@ -129,6 +131,8 @@ final class HcCalcsPanel extends PluginPanel
     private boolean restoringRunecraftPace;
     private boolean active;
     private boolean disposed;
+    private Skill progressSkill;
+    private Recipe bestRecipe;
 
     HcCalcsPanel(Map<String, RecipeCatalog> catalogs, List<UtilityCalculator> extra, MarketClient marketClient,
         ConfigManager config, SkillIconManager icons, Consumer<Consumer<CombatLoadout>> importCombatLoadout)
@@ -145,11 +149,6 @@ final class HcCalcsPanel extends PluginPanel
         trainingControls.setLayout(new BoxLayout(trainingControls, BoxLayout.Y_AXIS));
         trainingResults.setLayout(new BoxLayout(trainingResults, BoxLayout.Y_AXIS));
 
-        JLabel heading = new JLabel("HCW Calcs");
-        heading.setFont(heading.getFont().deriveFont(18f));
-        heading.setForeground(GOLD);
-        heading.setAlignmentX(Component.LEFT_ALIGNMENT);
-        calculatorPanel.add(heading);
         for (Skill item : HcCalcsPlugin.SKILLS) skill.addItem(item);
         extra.forEach(skill::addItem);
         skill.setRenderer(new DefaultListCellRenderer()
@@ -169,34 +168,45 @@ final class HcCalcsPanel extends PluginPanel
                 return this;
             }
         });
-        addLeft(skill);
+        skill.getAccessibleContext().setAccessibleName("Calculator");
+        JPanel priceControls = new JPanel(new BorderLayout(4, 0));
+        priceControls.add(skill, BorderLayout.CENTER);
+        priceControls.add(refresh, BorderLayout.EAST);
+        refresh.getAccessibleContext().setAccessibleName("Refresh HCW prices");
+        spaceHeaderRow(priceControls, 4);
+        addLeft(priceControls);
 
-        JPanel filters = new JPanel();
-        filters.setLayout(new BoxLayout(filters, BoxLayout.Y_AXIS));
-        filters.setBorder(BorderFactory.createEmptyBorder(4, 0, 4, 0));
-        JToggleButton showFilters = new JToggleButton("Options and filters");
-        showFilters.addActionListener(event -> filters.setVisible(showFilters.isSelected()));
+        viewControls.add(progressInput, BorderLayout.CENTER);
+        viewControls.add(filtersButton, BorderLayout.EAST);
+        filtersButton.setMargin(new Insets(0, 5, 0, 5));
+        Dimension filterSize = filtersButton.getPreferredSize();
+        filterSize.width = filtersButton.getFontMetrics(filtersButton.getFont()).stringWidth(filtersButton.getText()) + 16;
+        filtersButton.setPreferredSize(filterSize);
+        spaceHeaderRow(viewControls, 4);
+        filtersButton.addActionListener(event -> setFiltersOpen(filtersButton.isSelected()));
+        addLeft(viewControls);
+        addLeft(progressInput.modeControl());
+        spaceHeaderRow(categoryControl, 2);
+        addLeft(categoryControl);
+        addLeft(utilities.categoryControl());
+
+        trainingControls.setBorder(BorderFactory.createEmptyBorder(5, 0, 5, 0));
         addLeft(trainingControls, labeled("Minimum XP/action", minimumXp));
         minimumXp.setEditor(new JSpinner.NumberEditor(minimumXp, UtilityCalculator.NUMBER_PATTERN));
-        addLeft(trainingControls, showFilters);
-        addLeft(filters, labeled("Category", category));
-        addLeft(filters, labeled("Sort by", sort));
-        addLeft(filters, onlyAvailable);
-        addLeft(filters, labeled("Goal level (0 = off)", goal));
-        addLeft(filters, labeled("Min. 24h volume", minimumVolume));
+        addLeft(trainingControls, labeled("Sort by", sort));
+        addLeft(trainingControls, onlyAvailable);
+        addLeft(trainingControls, labeled("Min. 24h volume", minimumVolume));
         minimumVolume.setToolTipText("Minimum HCW buys for every ingredient and sells for every output.");
-        addLeft(trainingControls, filters);
-        filters.setVisible(false);
 
         herbloreOptions.setLayout(new GridLayout(0, 1, 0, 3));
         herbloreOptions.add(labeled("Amulet", amulet));
         herbloreOptions.add(goggles);
-        addLeft(filters, herbloreOptions);
+        addLeft(trainingControls, herbloreOptions);
 
         cookingOptions.setLayout(new GridLayout(0, 1, 0, 3));
         cookingOptions.add(labeled("Cooking method", kitchen));
         cookingOptions.add(gauntlets);
-        addLeft(filters, cookingOptions);
+        addLeft(trainingControls, cookingOptions);
         runecraftOptions.setLayout(new BoxLayout(runecraftOptions, BoxLayout.Y_AXIS));
         essencePerAltarUse.setToolTipText("Loose essence slots before packing pouches. Each pouch takes one slot.");
         addLeft(runecraftOptions, labeled("Base essence slots", essencePerAltarUse));
@@ -217,7 +227,6 @@ final class HcCalcsPanel extends PluginPanel
         }
         pouchOptions.setMaximumSize(new Dimension(Integer.MAX_VALUE, pouchOptions.getPreferredSize().height));
         addLeft(runecraftOptions, pouchOptions);
-        addLeft(filters, runecraftOptions);
 
         runsPerHour.setEditor(new JSpinner.NumberEditor(runsPerHour, UtilityCalculator.NUMBER_PATTERN));
         JPanel paceControl = new JPanel(new BorderLayout(3, 0));
@@ -230,27 +239,16 @@ final class HcCalcsPanel extends PluginPanel
         autoEssencePerRun.setToolTipText("Use the estimated capacity for this method.");
         runecraftPace.add(labeled("Runs per hour", paceControl));
         runecraftPace.add(labeled("Essence per run", essenceControl));
-        runecraftPace.setMaximumSize(new Dimension(Integer.MAX_VALUE, runecraftPace.getPreferredSize().height));
-        addLeft(trainingControls, runecraftPace);
-
-        JPanel priceControls = new JPanel(new BorderLayout(4, 0));
-        priceControls.setBorder(BorderFactory.createEmptyBorder(4, 0, 8, 0));
-        priceControls.add(status, BorderLayout.CENTER);
-        priceControls.add(refresh, BorderLayout.EAST);
-        priceControls.setMaximumSize(new Dimension(Integer.MAX_VALUE, priceControls.getPreferredSize().height));
-        addLeft(priceControls);
-
-        addLeft(progressInput);
+        fitHeight(runecraftPace);
         addLeft(trainingControls);
         addLeft(trainingResults);
-        addLeft(trainingResults, bestRate);
-        addLeft(trainingResults, resultsStatus);
+        addLeft(trainingResults, XpResults.rateHeader());
         results.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         XpResults.Cell resultCell = new XpResults.Cell();
         results.setCellRenderer((list, row, index, selected, focused) -> resultCell.render(list, row.recipe.name,
             "Lvl " + row.recipe.level + "  ·  " + fmt(row.recipe.xp)
-                + (row.recipe.runecraft != null ? " XP/essence" : row.recipe.range == null ? " XP" : " XP/cooked"),
-            -row.result.gpPerXp, selected, focused));
+                + (row.recipe.range == null ? " XP" : " XP/cook"),
+            -row.result.gpPerXp, row.recipe == bestRecipe, selected, focused));
         JScrollPane scroll = new JScrollPane(results, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
             JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
         results.setFixedCellHeight(XpResults.ROW_HEIGHT);
@@ -258,12 +256,18 @@ final class HcCalcsPanel extends PluginPanel
         scroll.setPreferredSize(new Dimension(190, XpResults.LIST_HEIGHT));
         scroll.setMaximumSize(new Dimension(Integer.MAX_VALUE, XpResults.LIST_HEIGHT));
         addLeft(trainingResults, scroll);
-        details.setEditable(false);
-        details.setLineWrap(true);
-        details.setWrapStyleWord(true);
-        details.setFocusable(false);
-        details.setFont(javax.swing.UIManager.getFont("Label.font"));
-        details.setBorder(BorderFactory.createEmptyBorder(6, 3, 6, 3));
+        addLeft(trainingResults, goalResult);
+        formatText(resultSummary);
+        formatText(details);
+        addLeft(trainingResults, resultSummary);
+        resultActions.add(setupButton);
+        resultActions.add(detailsButton);
+        fitHeight(resultActions);
+        addLeft(trainingResults, resultActions);
+        setupButton.addActionListener(event -> updateResultControls());
+        detailsButton.addActionListener(event -> updateResultControls());
+        addLeft(trainingResults, runecraftPace);
+        addLeft(trainingResults, runecraftOptions);
         addLeft(trainingResults, details);
         addLeft(trainingResults, sell);
         addLeft(utilities);
@@ -287,7 +291,6 @@ final class HcCalcsPanel extends PluginPanel
         category.addActionListener(event -> changed("category", category.getSelectedItem()));
         sort.addActionListener(event -> changed("sort", sort.getSelectedIndex()));
         onlyAvailable.addActionListener(event -> changed("availableOnly", onlyAvailable.isSelected()));
-        goal.addChangeListener(event -> changed("goal", goal.getValue()));
         minimumXp.addChangeListener(event -> changed("minXp", minimumXp.getValue()));
         minimumVolume.addChangeListener(event -> changed("minVolume", minimumVolume.getValue()));
         amulet.addActionListener(event -> changed("amulet", amulet.getSelectedItem()));
@@ -397,14 +400,27 @@ final class HcCalcsPanel extends PluginPanel
     {
         UtilityCalculator utility = selectedUtility();
         boolean showsProgress = utility == null || utility.hasTrainingProgress();
-        progressInput.setVisible(showsProgress);
+        progressSkill = utility == null ? selectedSkill() : utility.hasTrainingProgress() ? utility.skill : null;
+        progressInput.modeControl().setVisible(showsProgress);
+        filtersButton.setSelected(false);
+        filtersButton.setVisible(!(utility instanceof KingdomCalculator));
+        filtersButton.setToolTipText("Show calculation filters");
+        viewControls.removeAll();
+        if (showsProgress) viewControls.add(progressInput, BorderLayout.CENTER);
+        if (filtersButton.isVisible()) viewControls.add(filtersButton, showsProgress ? BorderLayout.EAST : BorderLayout.CENTER);
+        viewControls.setVisible(showsProgress || filtersButton.isVisible());
+        categoryControl.setVisible(utility == null);
+        utilities.categoryControl().setVisible(false);
+        setFiltersOpen(false);
+        detailsButton.setSelected(false);
+        setupButton.setSelected(false);
         if (showsProgress)
         {
-            Skill selected = utility == null ? selectedSkill() : utility.skill;
-            progressInput.configure(utility == null ? key(selected) : utility.id, utility == null ? "current" : "level",
+            Skill selected = progressSkill;
+            String scope = utility == null ? key(selected) : utility.id;
+            progressInput.configure(scope, utility == null ? "current" : "level",
                 () -> resolveProgress(selected, null).xp);
         }
-        trainingControls.setVisible(utility == null);
         trainingResults.setVisible(utility == null);
         utilities.setVisible(utility != null);
         if (utility == null)
@@ -428,6 +444,12 @@ final class HcCalcsPanel extends PluginPanel
         }
     }
 
+    private void setFiltersOpen(boolean open)
+    {
+        trainingControls.setVisible(open && selectedUtility() == null);
+        utilities.setFiltersOpen(open && selectedUtility() != null);
+    }
+
     private void configureSkill()
     {
         restoring = true;
@@ -437,7 +459,6 @@ final class HcCalcsPanel extends PluginPanel
         category.setSelectedItem(setting("category", String.class, ALL));
         sort.setSelectedIndex(Math.max(0, Math.min(sort.getItemCount() - 1, setting("sort", int.class, 1))));
         onlyAvailable.setSelected(setting("availableOnly", boolean.class, true));
-        goal.setValue(setting("goal", int.class, 0));
         minimumXp.setValue(setting("minXp", double.class, 0.0));
         minimumVolume.setValue(setting("minVolume", int.class, 0));
         amulet.setSelectedItem(setting("amulet", Amulet.class, Amulet.NONE));
@@ -446,8 +467,6 @@ final class HcCalcsPanel extends PluginPanel
         gauntlets.setSelected(setting("gauntlets", boolean.class, false));
         herbloreOptions.setVisible(selectedSkill() == Skill.HERBLORE);
         cookingOptions.setVisible(selectedSkill() == Skill.COOKING);
-        runecraftOptions.setVisible(selectedSkill() == Skill.RUNECRAFT);
-        runecraftPace.setVisible(selectedSkill() == Skill.RUNECRAFT);
         if (selectedSkill() == Skill.RUNECRAFT)
         {
             int batch = setting("essencePerUse", int.class, RunecraftRecipes.DEFAULT_ESSENCE_PER_USE);
@@ -552,6 +571,11 @@ final class HcCalcsPanel extends PluginPanel
 
     private void renderRows(boolean keepSelection)
     {
+        if (progressSkill != null)
+        {
+            SkillProgress progress = resolveProgress(progressSkill, progressInput.exactXp());
+            progressInput.showProgress(progress);
+        }
         if (selectedUtility() != null)
         {
             utilities.update(new UtilityCalculator.Market(market, volume, overrides, catalogue), levels, experience, keepSelection);
@@ -598,7 +622,7 @@ final class HcCalcsPanel extends PluginPanel
         eligible.sort(order);
         Row best = eligible.stream().filter(row -> Double.isFinite(row.result.gpPerXp))
             .max(Comparator.comparingDouble(row -> row.result.gpPerXp)).orElse(null);
-        bestRate.showRate(best == null ? null : best.recipe.name, best == null ? Double.NaN : -best.result.gpPerXp);
+        bestRecipe = best == null ? null : best.recipe;
         Row keep = selected == null ? null : eligible.stream().filter(row -> row.recipe == selected.recipe)
             .findFirst().orElse(null);
         rows.clear();
@@ -612,18 +636,16 @@ final class HcCalcsPanel extends PluginPanel
             results.setSelectedIndex(0);
             results.ensureIndexIsVisible(0);
         }
-        resultsStatus.setText(progress.levelLabel + " · " + eligible.size() + " recipes");
         if (tradeVolume > 0)
         {
-            resultsStatus.setToolTipText(volume == MarketSnapshot.EMPTY
+            filtersButton.setToolTipText(volume == MarketSnapshot.EMPTY
                 ? (volumeFailed ? "HCW volume unavailable" : "Waiting for HCW volume")
                 : "Volume for " + VOLUME_DATE.format(volume.asOf) + " UTC" +
                     (volumeFailed ? " · update failed" : ""));
         }
         else
         {
-            resultsStatus.setToolTipText(selectedSkill() == Skill.RUNECRAFT
-                ? "Base rune yields per essence. Outfit bonuses and travel costs are excluded." : null);
+            filtersButton.setToolTipText("Show calculation filters");
         }
         showDetails();
     }
@@ -632,65 +654,61 @@ final class HcCalcsPanel extends PluginPanel
     {
         Row row = results.getSelectedValue();
         configureRunecraftPace(row == null ? null : row.recipe);
+        updateResultControls();
         if (row == null)
         {
+            goalResult.setVisible(false);
             sell.setEnabled(false);
-            String reason = resultsStatus.getToolTipText();
-            details.setText(integer(minimumVolume) > 0 && volume == MarketSnapshot.EMPTY
-                ? (reason == null ? "Waiting for HCW volume" : reason) : "No recipes match your filters.");
+            String volumeStatus = volumeFailed ? "HCW volume unavailable" : "Waiting for HCW volume";
+            resultSummary.setText(integer(minimumVolume) > 0 && volume == MarketSnapshot.EMPTY
+                ? volumeStatus : "No recipes match your filters.");
+            details.setText("");
             return;
         }
         Recipe recipe = row.recipe;
         Result result = row.result;
         boolean runecraft = recipe.runecraft != null;
-        StringBuilder summary = new StringBuilder(recipe.name).append("\n")
-            .append(fmt(recipe.xp)).append(runecraft ? " XP/essence\n" : " XP/action\n");
-        if (runecraft)
-        {
-            summary.append(fmt(result.outputs.get(0).quantity())).append(" runes made per essence\n");
-        }
+        StringBuilder overview = new StringBuilder();
         if (recipe.range != null)
         {
-            summary.append("Burn rate ")
-                .append(Double.isFinite(result.success) ? fmt(100 * (1 - result.success)) + "%" : "—")
-                .append("\n");
+            overview.append(Double.isFinite(result.success) ? fmt(100 * (1 - result.success)) + "% burn · " : "");
         }
-        summary.append("Buy cost ").append(gp(result.cost)).append("\n")
-            .append("Net sale ").append(gp(result.netSale)).append("\n")
-            .append(runecraft ? "Profit/essence " : "Profit/action ")
-            .append(gp(result.netSale * result.success - result.cost)).append("\n");
-        if (runecraft && !recipe.runecraft.note.isEmpty())
+        StringBuilder summary = new StringBuilder("Buy ").append(gp(result.cost))
+            .append(" · Net sale ").append(gp(result.netSale)).append("\n");
+        if (runecraft)
         {
-            summary.append(recipe.runecraft.note).append("\n");
+            summary.append(fmt(result.outputs.get(0).quantity())).append(" runes per essence\n");
+            if (!recipe.runecraft.note.isEmpty()) summary.append(recipe.runecraft.note).append("\n");
+            summary.append("Base rune yields. Excludes outfit bonuses and travel costs.\n");
         }
         if (runecraft)
         {
             RunecraftHourly hourly = TrainingCalculator.runecraftHourly(recipe, result, runecraftLoad().loose,
                 integer(essencePerRun), ((Number) runsPerHour.getValue()).doubleValue());
-            summary.append("\nPer hour\n").append(fmt(hourly.xp)).append(" XP · ")
-                .append(fmt(hourly.runes)).append(" runes\nNet profit ").append(gp(hourly.profit)).append("\n");
+            overview.append(signedGp(hourly.profit)).append("/h\n").append(fmt(hourly.xp)).append(" XP/h · ")
+                .append(fmt(hourly.runes)).append(" runes/h");
+        }
+        else
+        {
+            overview.append(signedGp(result.netSale * result.success - result.cost)).append("/action");
         }
         if (selectedSkill() == Skill.SMITHING && recipe.category.equals("Blast Furnace"))
         {
             summary.append("Excludes Blast Furnace fees.\n");
         }
-        int target = integer(goal);
+        int target = progressInput.target();
         if (target > 0)
         {
             SkillProgress progress = currentProgress();
-            Goal plan = TrainingCalculator.goal(recipe, result, trainingSettings(), progress.level, progress.xp, target);
-            summary.append("\nTo level ").append(target).append("\n");
-            if (plan != null)
-            {
-                summary.append(fmt(plan.attempts)).append(runecraft ? " essence\n" : " actions\n")
-                    .append("Buy ").append(gp(plan.gross)).append("\n")
-                    .append("Net cost ").append(gp(plan.net)).append("\n");
-            }
-            else
-            {
-                summary.append("Goal unavailable at this level\n");
-            }
+            int magic = levels.getOrDefault(Skill.MAGIC, UtilityCalculator.DEFAULT_LEVEL);
+            boolean magicLocked = runecraft && recipe.runecraft.magicLevel > magic;
+            Goal plan = magicLocked ? null : TrainingCalculator.goal(recipe, result, trainingSettings(), progress.level, progress.xp, target);
+            String unavailable = magicLocked ? "Requires " + recipe.runecraft.magicLevel + " Magic"
+                : recipe.level > progress.level ? "Requires level " + recipe.level : "Estimate unavailable";
+            String unit = runecraft ? "Essence" : recipe.range == null ? "Actions" : "Attempts";
+            goalResult.showEstimate(progress.level, target, plan, unit, unavailable);
         }
+        else goalResult.setVisible(false);
         summary.append(runecraft ? "\nIngredients per essence\n" : "\nIngredients\n");
         for (Item item : runecraft ? recipe.inputs : result.inputs)
         {
@@ -714,9 +732,25 @@ final class HcCalcsPanel extends PluginPanel
             summary.append(fmt(item.quantity())).append(" × ").append(item.name()).append(" · ")
                 .append(gp(TrainingCalculator.salePrice(item.id(), market, overrides))).append(" each\n");
         }
-        details.setText(summary.toString());
+        resultSummary.setText(overview.toString());
+        resultSummary.setCaretPosition(0);
+        details.setText(summary.toString().stripTrailing());
         details.setCaretPosition(0);
         sell.setEnabled(canEdit);
+    }
+
+    private void updateResultControls()
+    {
+        Row row = results.getSelectedValue();
+        boolean runecraft = row != null && row.recipe.runecraft != null;
+        boolean setup = runecraft && setupButton.isSelected();
+        boolean expanded = row != null && detailsButton.isSelected();
+        resultActions.setVisible(row != null);
+        setupButton.setVisible(runecraft);
+        runecraftPace.setVisible(setup);
+        runecraftOptions.setVisible(setup);
+        details.setVisible(expanded);
+        sell.setVisible(expanded && row.result.outputs.stream().anyMatch(item -> item.id() != null));
     }
 
     private void configureRunecraftPace(Recipe recipe)
@@ -896,22 +930,11 @@ final class HcCalcsPanel extends PluginPanel
     private void updateMarketStatus()
     {
         String updated = market == MarketSnapshot.EMPTY ? "" : PRICE_TIME.format(market.asOf);
-        if (priceCall != null)
-        {
-            status.setText("Updating HCW…");
-        }
-        else if (priceFailed)
-        {
-            status.setText(updated.isEmpty() ? "No HCW prices" : "HCW · last quote");
-        }
-        else
-        {
-            status.setText(updated.isEmpty() ? "HCW prices" : "HCW · " + SHORT_PRICE_TIME.format(market.asOf));
-        }
-        status.setToolTipText(updated.isEmpty() ? null : "HCW snapshot " + updated + (priceFailed ? " · update failed" : ""));
         long wait = MarketClient.MANUAL_COOLDOWN_SECONDS - secondsSince(lastPriceAttempt);
+        String tooltip = updated.isEmpty() ? "Refresh HCW prices" : "HCW snapshot " + updated;
+        refresh.setToolTipText(tooltip + (priceFailed ? " · Update failed" : ""));
         refresh.setEnabled(priceCall == null && wait <= 0);
-        refresh.setText(wait > 0 ? "Refresh " + wait + "s" : "Refresh");
+        refresh.setText(priceCall != null ? "Loading…" : wait > 0 ? "Prices " + wait + "s" : priceFailed ? "Retry" : "Prices");
     }
 
     private static long secondsSince(Instant last)
@@ -920,6 +943,31 @@ final class HcCalcsPanel extends PluginPanel
     }
 
     private String gp(double value) { return Double.isFinite(value) ? UtilityCalculator.gp(value) : "—"; }
+
+    private static void formatText(JTextArea text)
+    {
+        text.setEditable(false);
+        text.setLineWrap(true);
+        text.setWrapStyleWord(true);
+        text.setFocusable(false);
+        text.setFont(javax.swing.UIManager.getFont("Label.font"));
+        text.setBorder(BorderFactory.createEmptyBorder(5, 4, 5, 4));
+    }
+
+    private static void fitHeight(JPanel panel)
+    {
+        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, panel.getPreferredSize().height));
+    }
+
+    static void spaceHeaderRow(JPanel row, int gapAfter)
+    {
+        row.setBorder(BorderFactory.createEmptyBorder(0, 0, gapAfter, 0));
+        Dimension preferred = row.getPreferredSize();
+        int height = Math.max(preferred.height, 26 + gapAfter);
+        row.setPreferredSize(new Dimension(preferred.width, height));
+        row.setMinimumSize(new Dimension(0, height));
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, height));
+    }
 
     private void addLeft(javax.swing.JComponent component)
     {
@@ -932,7 +980,7 @@ final class HcCalcsPanel extends PluginPanel
         parent.add(component);
     }
 
-    private static JPanel labeled(String name, Component control)
+    static JPanel labeled(String name, Component control)
     {
         JPanel panel = new JPanel(new BorderLayout(5, 0));
         JLabel label = new JLabel(name);

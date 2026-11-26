@@ -14,6 +14,7 @@ import javax.swing.DefaultListModel;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
+import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
@@ -41,21 +42,27 @@ final class UtilityPanel extends JPanel
     private final ConfigManager config;
     private final Runnable onChange;
     private final JPanel quickFilters = new JPanel(new BorderLayout(4, 0));
+    private final JPanel quickCategory = new JPanel(new BorderLayout(5, 0));
     private final JPanel combatControls = new JPanel();
     private final JPanel combatTarget = new JPanel(new BorderLayout());
     private final JButton importCombat = new JButton("Import stats & gear");
     private final JLabel combatImportStatus = new JLabel();
     private final JPanel form = new JPanel(new GridLayout(0, 1, 0, 3));
-    private final JToggleButton settings = new JToggleButton("Options and filters");
+    private final FarmingSetup farmingSetup = new FarmingSetup();
+    private final JToggleButton setupButton = new JToggleButton("Setup");
+    private final JToggleButton detailsButton = new JToggleButton("Details");
+    private final JPanel rowActions = new JPanel(new GridLayout(1, 0, 4, 0));
     private final DefaultListModel<Row> rows = new DefaultListModel<>();
     private final JList<Row> results = new JList<>(rows);
     private final JScrollPane scroll;
     private final JLabel count = new JLabel();
     private final JLabel notice = new JLabel();
-    private final XpResults.Best bestRate = new XpResults.Best();
+    private final JLabel rateHeader = XpResults.rateHeader();
     private final JButton optimizeKingdom = new JButton("Optimize for profits");
     private final KingdomAllocationView kingdomAllocation = new KingdomAllocationView();
     private final JTextArea details = new JTextArea();
+    private final JTextArea overview = new JTextArea();
+    private final GoalResult goalResult = new GoalResult();
     private final JButton sell = new JButton("Edit sell price");
     private final JButton action = new JButton();
     private final JButton marketLink = new JButton("Open HCW market page");
@@ -64,13 +71,16 @@ final class UtilityPanel extends JPanel
     private UtilityCalculator calculator;
     private Market market;
     private boolean kingdomRecommendationRequested;
+    private boolean filtersOpen;
     private CombatLoadout combatLoadout;
+    private Row bestRow;
 
     UtilityPanel(ConfigManager config, Runnable onChange, Consumer<List<Item>> editSell,
         Consumer<Consumer<CombatLoadout>> importLoadout)
     {
         this.config = config;
         this.onChange = onChange;
+        HcCalcsPanel.spaceHeaderRow(quickCategory, 2);
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
         combatControls.setLayout(new BoxLayout(combatControls, BoxLayout.Y_AXIS));
         combatControls.setBorder(BorderFactory.createEmptyBorder(0, 0, 4, 0));
@@ -89,23 +99,23 @@ final class UtilityPanel extends JPanel
             setCombatStatus("Importing…", null);
             importLoadout.accept(this::showImportedCombat);
         });
+        addLeft(farmingSetup.quick);
         addLeft(quickFilters);
-        addLeft(settings);
         addLeft(form);
         form.setVisible(false);
-        settings.addActionListener(event -> form.setVisible(settings.isSelected()));
         addLeft(notice);
-        addLeft(bestRate);
+        addLeft(rateHeader);
         addLeft(count);
         results.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         XpResults.Cell resultCell = new XpResults.Cell();
         results.setCellRenderer((list, row, index, selected, focused) ->
         {
             if (row.gpPerXp == null)
-                return resultCell.render(list, row.label, "", null, selected, focused);
+                return resultCell.render(list, row.label, "", null, false, selected, focused);
             String name = row.label.startsWith("★ ") ? "★ " + row.name : row.name;
             String xpText = Double.isFinite(row.xp) ? UtilityCalculator.fmt(row.xp) + " XP" : "XP unavailable";
-            return resultCell.render(list, name, "Lvl " + row.level + "  ·  " + xpText, row.gpPerXp, selected, focused);
+            return resultCell.render(list, name, "Lvl " + row.level + "  ·  " + xpText, row.gpPerXp,
+                row == bestRow, selected, focused);
         });
         scroll = new JScrollPane(results, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
             JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
@@ -114,6 +124,7 @@ final class UtilityPanel extends JPanel
         scroll.setPreferredSize(new Dimension(190, XpResults.LIST_HEIGHT));
         scroll.setMaximumSize(new Dimension(Integer.MAX_VALUE, XpResults.LIST_HEIGHT));
         addLeft(scroll);
+        addLeft(goalResult);
         addLeft(optimizeKingdom);
         optimizeKingdom.setVisible(false);
         optimizeKingdom.addActionListener(event ->
@@ -123,12 +134,16 @@ final class UtilityPanel extends JPanel
         });
         addLeft(kingdomAllocation);
         kingdomAllocation.setVisible(false);
-        details.setEditable(false);
-        details.setLineWrap(true);
-        details.setWrapStyleWord(true);
-        details.setFocusable(false);
-        details.setFont(javax.swing.UIManager.getFont("Label.font"));
-        details.setBorder(BorderFactory.createEmptyBorder(5, 3, 5, 3));
+        formatText(overview);
+        addLeft(overview);
+        rowActions.add(setupButton);
+        rowActions.add(detailsButton);
+        HcCalcsPanel.spaceHeaderRow(rowActions, 0);
+        addLeft(rowActions);
+        setupButton.addActionListener(event -> farmingSetup.update(values(), setupButton.isSelected()));
+        detailsButton.addActionListener(event -> showRow());
+        addLeft(farmingSetup);
+        formatText(details);
         addLeft(details);
         addLeft(sell);
         addLeft(action);
@@ -149,8 +164,10 @@ final class UtilityPanel extends JPanel
         calculator = selected;
         boolean kingdom = calculator instanceof KingdomCalculator;
         boolean combat = calculator instanceof CombatCalculator;
-        settings.setVisible(!kingdom && !combat);
-        form.setVisible(!kingdom && !combat && settings.isSelected());
+        detailsButton.setSelected(false);
+        setupButton.setSelected(false);
+        farmingSetup.collapse();
+        setFiltersOpen(filtersOpen);
         combatControls.setVisible(combat);
         scroll.setVisible(!kingdom);
         count.setVisible(!kingdom);
@@ -162,6 +179,16 @@ final class UtilityPanel extends JPanel
         }
         render(false);
     }
+
+    void setFiltersOpen(boolean open)
+    {
+        filtersOpen = open;
+        form.setVisible(open && calculator != null && !(calculator instanceof CombatCalculator)
+            && !(calculator instanceof KingdomCalculator));
+        quickFilters.setVisible(open && calculator != null && calculator.showsXp(values()));
+    }
+
+    JPanel categoryControl() { return quickCategory; }
 
     void update(Market market, Map<Skill, Integer> levels, Map<Skill, Integer> xp, boolean keepSelection)
     {
@@ -227,7 +254,9 @@ final class UtilityPanel extends JPanel
     {
         form.removeAll();
         quickFilters.removeAll();
+        quickCategory.removeAll();
         combatTarget.removeAll();
+        farmingSetup.clear();
         Values values = values();
         for (Field field : calculator.fields)
         {
@@ -238,9 +267,10 @@ final class UtilityPanel extends JPanel
             Object current = values.input.get(field.id);
             if (current instanceof Boolean)
             {
-                JCheckBox box = new JCheckBox(field.label, (boolean) current);
+                javax.swing.AbstractButton box = calculator instanceof FarmingCalculator && field.id.equals("secateurs")
+                    ? new JToggleButton(field.label, (boolean) current) : new JCheckBox(field.label, (boolean) current);
                 box.addActionListener(event -> changed(field, box.isSelected()));
-                form.add(box);
+                addOption(field, box, false);
             }
             else if (!field.options.isEmpty())
             {
@@ -249,8 +279,15 @@ final class UtilityPanel extends JPanel
                 options.addActionListener(event -> changed(field, ((Option) options.getSelectedItem()).id));
                 if (calculator instanceof CombatCalculator && field.id.equals("target"))
                     combatTarget.add(labeled(field.label, options), BorderLayout.CENTER);
+                else if (field.id.equals("category") || (calculator instanceof PrayerCalculator && field.id.equals("method")))
+                {
+                    JLabel label = new JLabel(field.label);
+                    label.setLabelFor(options);
+                    quickCategory.add(label, BorderLayout.WEST);
+                    quickCategory.add(options, BorderLayout.CENTER);
+                }
                 else
-                    form.add(labeled(field.label, options));
+                    addOption(field, options, true);
             }
             else if (current instanceof Number)
             {
@@ -273,7 +310,7 @@ final class UtilityPanel extends JPanel
                 }
                 else
                 {
-                    form.add(labeled(field.label, spinner));
+                    addOption(field, spinner, true);
                 }
             }
             else
@@ -286,14 +323,24 @@ final class UtilityPanel extends JPanel
                     public void changedUpdate(DocumentEvent event) { update(); }
                     private void update() { changed(field, input.getText()); }
                 });
-                form.add(labeled(field.label, input));
+                addOption(field, input, true);
             }
         }
-        quickFilters.setVisible(calculator.showsXp(values));
+        quickFilters.setVisible(filtersOpen && calculator.showsXp(values));
+        quickCategory.setVisible(quickCategory.getComponentCount() > 0);
         quickFilters.revalidate();
+        quickCategory.revalidate();
         combatTarget.revalidate();
         form.revalidate();
         form.repaint();
+    }
+
+    private void addOption(Field field, JComponent control, boolean labeled)
+    {
+        if (calculator instanceof FarmingCalculator && FarmingSetup.isSetting(field.id))
+            farmingSetup.addSetting(field.id, labeled ? HcCalcsPanel.labeled(field.label, control) : control);
+        else
+            form.add(labeled ? labeled(field.label, control) : control);
     }
 
     private void render(boolean keepSelection)
@@ -309,23 +356,19 @@ final class UtilityPanel extends JPanel
         }
         Row previous = keepSelection ? selected() : null;
         Values values = values();
+        if (calculator instanceof FarmingCalculator) farmingSetup.update(values, setupButton.isSelected());
         boolean showXp = calculator.showsXp(values);
-        quickFilters.setVisible(showXp);
-        bestRate.setVisible(showXp);
+        quickFilters.setVisible(filtersOpen && showXp);
+        rateHeader.setVisible(showXp);
         results.setFixedCellHeight(showXp ? XpResults.ROW_HEIGHT : 26);
         List<Row> available = calculator instanceof CombatCalculator && combatLoadout != null
             ? ((CombatCalculator) calculator).calculate(values, market, combatLoadout) : calculator.calculate(values, market);
         boolean assumedCombat = calculator instanceof CombatCalculator && combatLoadout == null
             && (!values.levels.containsKey(Skill.MAGIC) || !values.levels.containsKey(Skill.RANGED));
-        String status = calculator.hasTrainingProgress() ? values.trainingProgress(calculator.skill).levelLabel + " · "
-            : assumedCombat ? "Auto uses 99 · " : "";
-        count.setText(status + available.size() + " results");
-        if (showXp)
-        {
-            Row best = available.stream().filter(row -> row.gpPerXp != null && Double.isFinite(row.gpPerXp))
-                .min(UtilityCalculator.bestXpOrder()).orElse(null);
-            bestRate.showRate(best == null ? null : best.name, best == null ? Double.NaN : best.gpPerXp);
-        }
+        count.setVisible(available.isEmpty() || assumedCombat);
+        count.setText(available.isEmpty() ? "No matching results" : "Auto uses 99");
+        bestRow = showXp ? available.stream().filter(row -> row.gpPerXp != null && Double.isFinite(row.gpPerXp))
+            .min(UtilityCalculator.bestXpOrder()).orElse(null) : null;
         rows.clear();
         rows.addAll(available);
         for (int index = 0; index < available.size(); index++)
@@ -347,7 +390,10 @@ final class UtilityPanel extends JPanel
     private void renderKingdom()
     {
         quickFilters.setVisible(false);
-        bestRate.setVisible(false);
+        rateHeader.setVisible(false);
+        rowActions.setVisible(false);
+        overview.setVisible(false);
+        goalResult.setVisible(false);
         sell.setVisible(false);
         action.setVisible(false);
         marketLink.setVisible(false);
@@ -392,14 +438,44 @@ final class UtilityPanel extends JPanel
     private void showRow()
     {
         Row row = selected();
-        details.setVisible(true);
-        details.setText(row == null ? "No results match the filters." : row.detail);
+        boolean show = row != null && !(calculator instanceof KingdomCalculator);
+        boolean expanded = show && detailsButton.isSelected();
+        boolean farming = calculator instanceof FarmingCalculator;
+        Values values = calculator == null ? null : values();
+        if (show && calculator.hasTrainingProgress())
+        {
+            int current = values.trainingProgress(calculator.skill).level;
+            goalResult.showEstimate(current, values.integer("goal"), row.goal, farming ? "Patches" : "Actions",
+                current < row.level ? "Requires level " + row.level : "Estimate unavailable");
+        }
+        else goalResult.setVisible(false);
+        rowActions.setVisible(show || farming);
+        setupButton.setVisible(farming);
+        detailsButton.setVisible(show);
+        String summary = row == null ? "" : row.summary;
+        overview.setText(summary);
+        overview.setCaretPosition(0);
+        overview.setVisible(!summary.isEmpty());
+        if (!summary.isEmpty())
+            overview.setMaximumSize(new Dimension(Integer.MAX_VALUE, overview.getPreferredSize().height));
+        details.setVisible(expanded);
+        details.setText(row == null ? "" : row.detail);
         details.setCaretPosition(0);
-        sell.setVisible(row != null && row.outputs.stream().anyMatch(item -> item.id() != null));
-        String label = calculator == null ? null : calculator.actionLabel(values(), row, market);
-        action.setVisible(label != null);
+        sell.setVisible(expanded && row.outputs.stream().anyMatch(item -> item.id() != null));
+        String label = calculator == null ? null : calculator.actionLabel(values, row, market);
+        action.setVisible(expanded && label != null);
         action.setText(label);
-        marketLink.setVisible(calculator instanceof AlchemyCalculator && row != null && row.itemId > 0);
+        marketLink.setVisible(expanded && calculator instanceof AlchemyCalculator && row.itemId > 0);
+    }
+
+    private static void formatText(JTextArea text)
+    {
+        text.setEditable(false);
+        text.setLineWrap(true);
+        text.setWrapStyleWord(true);
+        text.setFocusable(false);
+        text.setFont(javax.swing.UIManager.getFont("Label.font"));
+        text.setBorder(BorderFactory.createEmptyBorder(5, 3, 5, 3));
     }
 
     private void addLeft(javax.swing.JComponent component)

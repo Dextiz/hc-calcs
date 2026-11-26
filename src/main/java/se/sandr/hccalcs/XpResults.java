@@ -2,6 +2,7 @@ package se.sandr.hccalcs;
 
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Dimension;
 import java.awt.Font;
 import javax.swing.BorderFactory;
 import javax.swing.JLabel;
@@ -14,8 +15,8 @@ final class XpResults
 {
     static final String RATE = "GP/XP";
     static final String RATE_HINT = "Net GP per XP. Positive means profit. Negative means cost.";
-    static final int ROW_HEIGHT = 44;
-    static final int LIST_HEIGHT = ROW_HEIGHT * 5 + 2;
+    static final int ROW_HEIGHT = 39;
+    static final int LIST_HEIGHT = ROW_HEIGHT * 6 + 2;
     static final Color GOLD = new Color(241, 199, 104);
     private static final Color PROFIT = new Color(151, 225, 165);
     private static final Color COST = new Color(255, 159, 162);
@@ -35,37 +36,13 @@ final class XpResults
         return costPerXp < 0 ? PROFIT : COST;
     }
 
-    static final class Best extends JPanel
+    static JLabel rateHeader()
     {
-        private final JLabel caption = new JLabel();
-        private final JLabel value = new JLabel();
-
-        Best()
-        {
-            super(new BorderLayout(0, 4));
-            setBorder(BorderFactory.createEmptyBorder(8, 4, 8, 4));
-            JLabel title = new JLabel("Best GP/XP");
-            title.setForeground(GOLD);
-            title.setFont(title.getFont().deriveFont(Font.BOLD));
-            title.setToolTipText(RATE_HINT);
-            caption.putClientProperty("html.disable", true);
-            add(title, BorderLayout.NORTH);
-            JPanel summary = new JPanel(new BorderLayout(8, 0));
-            summary.setOpaque(false);
-            value.setFont(value.getFont().deriveFont(Font.BOLD));
-            summary.add(caption, BorderLayout.CENTER);
-            summary.add(value, BorderLayout.EAST);
-            add(summary, BorderLayout.CENTER);
-        }
-
-        void showRate(String name, double gpPerXp)
-        {
-            caption.setText(Double.isFinite(gpPerXp) ? name : "No priced results");
-            caption.setToolTipText(name == null ? RATE_HINT : rate(gpPerXp) + " " + RATE + " · " + name);
-            value.setText(Double.isFinite(gpPerXp) ? rate(gpPerXp) : "");
-            value.setForeground(rateColor(gpPerXp, caption.getForeground()));
-            value.setToolTipText(RATE_HINT);
-        }
+        JLabel label = new JLabel(RATE, SwingConstants.RIGHT);
+        label.setToolTipText(RATE_HINT);
+        label.setBorder(BorderFactory.createEmptyBorder(4, 0, 2, 6));
+        label.setMaximumSize(new Dimension(Integer.MAX_VALUE, label.getPreferredSize().height));
+        return label;
     }
 
     static final class Cell extends JPanel
@@ -88,23 +65,24 @@ final class XpResults
             add(value, BorderLayout.EAST);
         }
 
-        Cell render(JList<?> list, String title, String meta, Double gpPerXp, boolean selected, boolean focused)
+        Cell render(JList<?> list, String title, String meta, Double gpPerXp, boolean best, boolean selected, boolean focused)
         {
             name.setText(title);
-            subtitle.setText(meta);
+            subtitle.setText(best ? "Best · " + meta : meta);
             subtitle.setVisible(!meta.isEmpty());
             value.setText(gpPerXp == null ? "" : rate(gpPerXp));
             value.setVisible(gpPerXp != null);
             setBackground(selected ? list.getSelectionBackground() : list.getBackground());
             Color foreground = selected ? list.getSelectionForeground() : list.getForeground();
             name.setForeground(foreground);
-            subtitle.setForeground(foreground);
+            subtitle.setForeground(best ? GOLD : foreground);
             value.setForeground(gpPerXp == null ? foreground : rateColor(gpPerXp, foreground));
             setBorder(BorderFactory.createCompoundBorder(focused ? UIManager.getBorder("List.focusCellHighlightBorder")
-                : BorderFactory.createEmptyBorder(1, 1, 1, 1), BorderFactory.createEmptyBorder(4, 4, 4, 4)));
+                : BorderFactory.createEmptyBorder(1, 1, 1, 1), BorderFactory.createEmptyBorder(3, 4, 3, 4)));
             String description = title + (gpPerXp == null ? "" : " · " + rate(gpPerXp) + " " + RATE);
             setToolTipText(description);
-            getAccessibleContext().setAccessibleName(meta.isEmpty() ? description : description + " · " + meta);
+            getAccessibleContext().setAccessibleName((best ? "Best GP/XP · " : "")
+                + (meta.isEmpty() ? description : description + " · " + meta));
             return this;
         }
     }

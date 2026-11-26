@@ -117,8 +117,13 @@ final class PrayerCalculator extends UtilityCalculator
         supplies.add(0, remains);
         if (!trainingAllowed(values, market, level, xp, supplies, List.of())) return;
         double cost = basket(supplies, market::buy);
+        String detail = remains.name() + "\nPrayer level " + level + " · " + fmt(xp) + " XP/action\n" + note
+            + "\nCost " + gp(cost) + "\n"
+            + (extra.isEmpty() ? "" : "Supplies " + gp(basket(extra, market::buy)) + "\n")
+            + "\n" + itemLines(supplies, market::buy);
+        Row row = new Row(remains.name(), remains.name(), detail, List.of())
+            .training(level, xp, -cost / xp, cost).rate(cost / xp);
         long actions = goalActions(values, level, xp);
-        String goal = "";
         if (actions > 0)
         {
             double total = market.buy(remains.id()) * actions;
@@ -134,14 +139,9 @@ final class PrayerCalculator extends UtilityCalculator
                     quantity = supply.quantity() * actions;
                 total += quantity * market.buy(supply.id());
             }
-            goal = "\nTo goal\n" + fmt(actions) + " actions · " + gp(total) + "\n";
+            row.goal = new TrainingCalculator.Goal(actions, total, total);
         }
-        String detail = remains.name() + "\nPrayer level " + level + " · " + fmt(xp) + " XP/action\n" + note
-            + "\nCost " + gp(cost) + "\n"
-            + (extra.isEmpty() ? "" : "Supplies " + gp(basket(extra, market::buy)) + "\n")
-            + "\n" + itemLines(supplies, market::buy) + goal;
-        rows.add(new Row(remains.name(), remains.name(), detail,
-            List.of()).training(level, xp, -cost / xp, cost).rate(cost / xp));
+        rows.add(row);
     }
 
     private static List<Item> offering(int id, String rune)

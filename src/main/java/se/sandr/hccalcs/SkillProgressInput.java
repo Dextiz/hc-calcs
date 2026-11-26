@@ -2,18 +2,13 @@ package se.sandr.hccalcs;
 
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
-import java.awt.Dimension;
 import java.awt.GridLayout;
-import java.text.DecimalFormatSymbols;
-import java.util.Locale;
 import java.util.function.IntSupplier;
 import javax.swing.BorderFactory;
 import javax.swing.ButtonGroup;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
-import javax.swing.JSpinner;
 import javax.swing.JToggleButton;
-import javax.swing.SpinnerNumberModel;
 import net.runelite.api.Experience;
 import net.runelite.client.config.ConfigManager;
 
@@ -23,21 +18,30 @@ final class SkillProgressInput extends JPanel
     private static final String EXACT_MODE = ".exactXpMode";
     private static final String EXACT_XP = ".exactXp";
     private final JToggleButton levelButton = new JToggleButton("Level");
-    private final JToggleButton xpButton = new JToggleButton("Exact XP");
-    private final JSpinner level = new JSpinner(new SpinnerNumberModel(0, 0, Experience.MAX_REAL_LEVEL, 1));
-    private final JSpinner xp = new JSpinner(new SpinnerNumberModel(0, 0, Experience.MAX_SKILL_XP, 1));
+    private final JToggleButton xpButton = new JToggleButton("XP");
+    private final InlineNumberInput level = new InlineNumberInput("Lvl", "Current level",
+        "Clear the field to use your game level, or level 99 if unavailable.", 2, Experience.MAX_REAL_LEVEL, this::saveLevel);
+    private final InlineNumberInput xp = new InlineNumberInput("XP", "Current exact XP",
+        "Enter total XP from 0 to 200,000,000.", 9, Experience.MAX_SKILL_XP, this::saveXp);
+    private final InlineNumberInput goal = new InlineNumberInput("Goal", "Goal level",
+        "Enter a target level from 1 to 99. Clear the field to remove the goal.", 2, Experience.MAX_REAL_LEVEL, this::saveGoal);
     private final CardLayout fields = new CardLayout();
     private final JPanel input = new JPanel(fields);
+    private final JPanel modeControl = new JPanel(new BorderLayout());
+    private final JLabel modeStatus = new JLabel();
     private final ConfigManager config;
     private final Runnable onChange;
     private String scope;
     private String levelKey;
     private IntSupplier seedXp;
-    private boolean restoring;
+    private int manualLevel;
+    private int resolvedLevel;
+    private int exactXp;
+    private int target;
 
     SkillProgressInput(ConfigManager config, Runnable onChange)
     {
-        super(new BorderLayout(0, 4));
+        super(new BorderLayout(6, 0));
         this.config = config;
         this.onChange = onChange;
 
@@ -47,23 +51,18 @@ final class SkillProgressInput extends JPanel
         JPanel toggle = new JPanel(new GridLayout(1, 2, 3, 0));
         toggle.add(levelButton);
         toggle.add(xpButton);
-        add(toggle, BorderLayout.NORTH);
+        modeControl.add(toggle, BorderLayout.WEST);
+        modeStatus.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 4));
+        modeControl.add(modeStatus, BorderLayout.EAST);
+        HcCalcsPanel.spaceHeaderRow(modeControl, 4);
 
-        level.setToolTipText("0 uses your game level, or level 99 if unavailable.");
-        xp.setToolTipText("Enter the skill's total XP. The calculator uses it for unlocks and level goals.");
-        JSpinner.NumberEditor editor = new JSpinner.NumberEditor(xp, "#,##0");
-        editor.getFormat().setDecimalFormatSymbols(DecimalFormatSymbols.getInstance(Locale.UK));
-        xp.setEditor(editor);
-        input.add(labeled("Level (0 = auto)", level), "level");
-        input.add(labeled("Current XP", xp), "xp");
+        input.add(level, "level");
+        input.add(xp, "xp");
         add(input, BorderLayout.CENTER);
-        setBorder(BorderFactory.createEmptyBorder(3, 0, 3, 0));
-        setMaximumSize(new Dimension(Integer.MAX_VALUE, getPreferredSize().height));
+        add(goal, BorderLayout.EAST);
 
         levelButton.addActionListener(event -> selectMode(false));
         xpButton.addActionListener(event -> selectMode(true));
-        level.addChangeListener(event -> save(levelKey, level.getValue()));
-        xp.addChangeListener(event -> save(scope + EXACT_XP, xp.getValue()));
     }
 
     void configure(String scope, String levelField, IntSupplier seedXp)
@@ -71,17 +70,32 @@ final class SkillProgressInput extends JPanel
         this.scope = scope;
         this.levelKey = scope + "." + levelField;
         this.seedXp = seedXp;
-        restoring = true;
         Integer savedLevel = config.getConfiguration(GROUP, levelKey, int.class);
-        level.setValue(savedLevel == null ? 0 : Math.max(0, Math.min(Experience.MAX_REAL_LEVEL, savedLevel)));
+        manualLevel = savedLevel == null ? 0 : Math.max(0, Math.min(Experience.MAX_REAL_LEVEL, savedLevel));
+        level.showValue(manualLevel);
         Integer saved = savedExactXp(config, scope);
-        xp.setValue(saved == null ? 0 : saved);
+        exactXp = saved == null ? 0 : saved;
+        xp.showValue(exactXp);
+        Integer savedGoal = config.getConfiguration(GROUP, scope + ".goal", int.class);
+        target = savedGoal != null && savedGoal > 0 && savedGoal <= Experience.MAX_REAL_LEVEL ? savedGoal : 0;
+        showGoal();
         showMode(saved != null);
-        restoring = false;
     }
 
-    int level() { return (int) level.getValue(); }
-    Integer exactXp() { return xpButton.isSelected() ? (int) xp.getValue() : null; }
+    JPanel modeControl() { return modeControl; }
+    int level() { return manualLevel; }
+    Integer exactXp() { return xpButton.isSelected() ? exactXp : null; }
+    int target() { return target; }
+
+    void showProgress(SkillProgress progress)
+    {
+        resolvedLevel = progress.level;
+        boolean exact = xpButton.isSelected();
+        if (!exact && manualLevel == 0) level.showWhenIdle(resolvedLevel);
+        modeStatus.setText(exact ? "Lvl " + resolvedLevel : "Auto");
+        modeStatus.setToolTipText(progress.levelLabel);
+        modeStatus.setVisible(exact || manualLevel == 0);
+    }
 
     static Integer savedExactXp(ConfigManager config, String scope)
     {
@@ -100,9 +114,8 @@ final class SkillProgressInput extends JPanel
                 saved = seedXp.getAsInt();
                 config.setConfiguration(GROUP, scope + EXACT_XP, saved);
             }
-            restoring = true;
-            xp.setValue(saved);
-            restoring = false;
+            exactXp = saved;
+            xp.showValue(saved);
         }
         config.setConfiguration(GROUP, scope + EXACT_MODE, exact);
         showMode(exact);
@@ -118,20 +131,34 @@ final class SkillProgressInput extends JPanel
         fields.show(input, exact ? "xp" : "level");
     }
 
-    private void save(String key, Object value)
+    private void saveLevel(int value)
     {
-        if (restoring || key == null) return;
-        config.setConfiguration(GROUP, key, value);
+        manualLevel = value;
+        config.setConfiguration(GROUP, levelKey, value);
+        onChange.run();
+        if (value == 0) level.showValue(resolvedLevel);
+    }
+
+    private void saveXp(int value)
+    {
+        exactXp = value;
+        config.setConfiguration(GROUP, scope + EXACT_XP, value);
         onChange.run();
     }
 
-    private static JPanel labeled(String label, JSpinner spinner)
+    private void saveGoal(int value)
     {
-        JPanel row = new JPanel(new BorderLayout(6, 0));
-        JLabel text = new JLabel(label);
-        text.setLabelFor(spinner);
-        row.add(text, BorderLayout.WEST);
-        row.add(spinner, BorderLayout.CENTER);
-        return row;
+        target = value;
+        String key = scope + ".goal";
+        if (value == 0) config.unsetConfiguration(GROUP, key);
+        else config.setConfiguration(GROUP, key, value);
+        showGoal();
+        onChange.run();
+    }
+
+    private void showGoal()
+    {
+        goal.showValue(target == 0 ? null : target);
+        goal.highlight(target > 0);
     }
 }

@@ -82,10 +82,10 @@ final class UtilityChecks
         Row dragon = find(prayer.calculate(sunfire, market), "Dragon bones");
         close(dragon.xp, 348, "Sunfire XP");
         close(dragon.cost, 3149.35, "Average sunfire supplies");
-        require(dragon.detail.contains("48,090 GP"), "Whole jugs and splinters for the goal");
+        close(dragon.goal.net, 48_090, "Whole jugs and splinters for the goal");
         Values exactPrayer = new Values(sunfire.input, Map.of(Skill.PRAYER, 99), Map.of(),
             Experience.getXpForLevel(60) - 5000);
-        require(find(prayer.calculate(exactPrayer, market), "Dragon bones").detail.contains("48,090 GP"),
+        close(find(prayer.calculate(exactPrayer, market), "Dragon bones").goal.net, 48_090,
             "Exact Prayer XP overrides level and determines the goal cost");
 
         UtilityCalculator farming = calculators.get("farming");

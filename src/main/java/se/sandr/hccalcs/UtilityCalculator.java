@@ -25,6 +25,7 @@ import net.runelite.api.Experience;
 import net.runelite.api.Skill;
 import se.sandr.hccalcs.AlchemyCalculator.AlchItem;
 import se.sandr.hccalcs.RecipeCatalog.Item;
+import se.sandr.hccalcs.TrainingCalculator.Goal;
 
 abstract class UtilityCalculator
 {
@@ -114,7 +115,7 @@ abstract class UtilityCalculator
     {
         number("level", "", 0, 0, Experience.MAX_REAL_LEVEL);
         flag("only", "Only show unlocked", true);
-        number("goal", "Goal level (0 = off)", 0, 0, 99);
+        number("goal", "", 0, 0, Experience.MAX_REAL_LEVEL);
         xpFilter();
         number("volume", "Min. 24h volume", 0, 0, Integer.MAX_VALUE);
         choice("sort", "Sort by", BEST_GP_XP, TRAINING_SORTS);
@@ -188,6 +189,11 @@ abstract class UtilityCalculator
     }
 
     static String gp(double value) { return fmt(value) + " GP"; }
+
+    static String signedGp(double value)
+    {
+        return Double.isFinite(value) ? (value > 0 ? "+" : "") + gp(value) : "—";
+    }
     static String percent(double value) { return fmt(value * 100) + "%"; }
 
     static String age(long timestamp, long now)
@@ -259,6 +265,8 @@ abstract class UtilityCalculator
 
     static final class Row
     {
+        String summary = "";
+        Goal goal;
         final String name;
         final String label;
         final String detail;
