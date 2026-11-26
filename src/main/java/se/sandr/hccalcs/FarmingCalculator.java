@@ -60,7 +60,7 @@ final class FarmingCalculator extends UtilityCalculator
     {
         List<Row> rows = new ArrayList<>();
         String category = values.text("category");
-        int level = values.level(Skill.FARMING, "level");
+        int level = values.trainingProgress(Skill.FARMING).level;
         Map<Integer, Double> custom = harvestOverrides(values);
         for (JsonElement element : array(data, "crops"))
         {

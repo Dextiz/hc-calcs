@@ -15,7 +15,7 @@ import net.runelite.client.util.ImageUtil;
 
 final class HcCalcsIntro extends JPanel
 {
-    static final String VERSION = "0.2.11";
+    static final String VERSION = "0.2.12";
     private static final int TEXT_WIDTH = 176;
     private final JButton open = new JButton("Open calculators");
 
@@ -54,8 +54,8 @@ final class HcCalcsIntro extends JPanel
         label.setAlignmentX(Component.LEFT_ALIGNMENT);
         notes.add(label);
         notes.add(Box.createVerticalStrut(8));
-        JLabel updates = copy("• New name, HCW Calcs<br>"
-            + "• High Alchemy respects daily buy-volume limits", false);
+        JLabel updates = copy("• Runecrafting with pouch and hourly estimates<br>"
+            + "• Level or Exact XP on every skill calculator", false);
         updates.setAlignmentX(Component.LEFT_ALIGNMENT);
         notes.add(updates);
         addCentered(notes);

@@ -18,7 +18,9 @@ final class RecipeCatalog
         try (Reader reader = new InputStreamReader(Objects.requireNonNull(
             RecipeCatalog.class.getResourceAsStream("/hc-calcs-recipes.json")), StandardCharsets.UTF_8))
         {
-            return gson.fromJson(reader, new TypeToken<Map<String, RecipeCatalog>>() {}.getType());
+            Map<String, RecipeCatalog> catalogs = gson.fromJson(reader, new TypeToken<Map<String, RecipeCatalog>>() {}.getType());
+            catalogs.put("runecraft", RunecraftRecipes.load());
+            return catalogs;
         }
     }
 
@@ -39,6 +41,7 @@ final class RecipeCatalog
         int[] range;
         int[] fire;
         int[] gauntlets;
+        RunecraftRecipes.Method runecraft;
     }
 
     static final class Item

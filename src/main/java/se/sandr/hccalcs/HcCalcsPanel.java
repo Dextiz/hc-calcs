@@ -14,6 +14,8 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -46,10 +48,13 @@ import okhttp3.Call;
 import se.sandr.hccalcs.AlchemyCalculator.AlchItem;
 import se.sandr.hccalcs.RecipeCatalog.Item;
 import se.sandr.hccalcs.RecipeCatalog.Recipe;
+import se.sandr.hccalcs.RunecraftRecipes.EssencePouch;
+import se.sandr.hccalcs.RunecraftRecipes.PouchLoad;
 import se.sandr.hccalcs.TrainingCalculator.Amulet;
 import se.sandr.hccalcs.TrainingCalculator.Goal;
 import se.sandr.hccalcs.TrainingCalculator.Kitchen;
 import se.sandr.hccalcs.TrainingCalculator.Result;
+import se.sandr.hccalcs.TrainingCalculator.RunecraftHourly;
 import se.sandr.hccalcs.TrainingCalculator.Settings;
 
 final class HcCalcsPanel extends PluginPanel
@@ -69,13 +74,13 @@ final class HcCalcsPanel extends PluginPanel
     private final JPanel calculatorPanel = new JPanel();
     private final HcCalcsIntro intro;
     private final JComboBox<Object> skill = new JComboBox<>();
+    private final SkillProgressInput progressInput;
     private final JPanel trainingControls = new JPanel();
     private final JPanel trainingResults = new JPanel();
     private final UtilityPanel utilities;
     private final JComboBox<String> category = new JComboBox<>();
     private final JComboBox<String> sort = new JComboBox<>(new String[]{"Level", "Best GP/XP", "Highest XP/action"});
     private final JCheckBox onlyAvailable = new JCheckBox("Only show recipes I can use");
-    private final JSpinner current = new JSpinner(new SpinnerNumberModel(0, 0, 99, 1));
     private final JSpinner goal = new JSpinner(new SpinnerNumberModel(0, 0, 99, 1));
     private final JSpinner minimumXp = new JSpinner(new SpinnerNumberModel(0.0, 0.0, 100000.0, 1.0));
     private final JSpinner minimumVolume = new JSpinner(new SpinnerNumberModel(0, 0, Integer.MAX_VALUE, 100));
@@ -83,8 +88,18 @@ final class HcCalcsPanel extends PluginPanel
     private final JCheckBox goggles = new JCheckBox("Prescription goggles");
     private final JComboBox<Kitchen> kitchen = new JComboBox<>(Kitchen.values());
     private final JCheckBox gauntlets = new JCheckBox("Cooking gauntlets");
+    private final JSpinner essencePerAltarUse = new JSpinner(new SpinnerNumberModel(
+        RunecraftRecipes.DEFAULT_ESSENCE_PER_USE, 1, 28, 1));
+    private final JSpinner runsPerHour = new JSpinner(new SpinnerNumberModel(50.0, 0.1, 3600.0, 1.0));
+    private final JSpinner essencePerRun = new JSpinner(new SpinnerNumberModel(
+        RunecraftRecipes.DEFAULT_ESSENCE_PER_USE, 1, 1000, 1));
+    private final JButton resetRunecraftPace = new JButton("Reset");
+    private final JButton autoEssencePerRun = new JButton("Auto");
+    private final Map<EssencePouch, JCheckBox> essencePouches = new EnumMap<>(EssencePouch.class);
+    private final JPanel runecraftPace = new JPanel(new GridLayout(0, 1, 0, 3));
     private final JPanel herbloreOptions = new JPanel();
     private final JPanel cookingOptions = new JPanel();
+    private final JPanel runecraftOptions = new JPanel();
     private final JLabel status = new JLabel("HCW market prices");
     private final JLabel resultsStatus = new JLabel();
     private final XpResults.Best bestRate = new XpResults.Best();
@@ -111,6 +126,7 @@ final class HcCalcsPanel extends PluginPanel
     private boolean volumeFailed;
     private boolean catalogueFailed;
     private boolean restoring;
+    private boolean restoringRunecraftPace;
     private boolean active;
     private boolean disposed;
 
@@ -123,6 +139,7 @@ final class HcCalcsPanel extends PluginPanel
         intro = HcCalcsIntro.VERSION.equals(config.getConfiguration(CONFIG_GROUP, SEEN_INTRO))
             ? null : new HcCalcsIntro(this::openCalculators);
         utilities = new UtilityPanel(config, this::utilityChanged, this::editSale, importCombatLoadout);
+        progressInput = new SkillProgressInput(config, this::renderRows);
         setLayout(new BorderLayout());
         calculatorPanel.setLayout(new BoxLayout(calculatorPanel, BoxLayout.Y_AXIS));
         trainingControls.setLayout(new BoxLayout(trainingControls, BoxLayout.Y_AXIS));
@@ -146,7 +163,7 @@ final class HcCalcsPanel extends PluginPanel
                     : value instanceof UtilityCalculator ? ((UtilityCalculator) value).skill : null;
                 if (value instanceof Skill)
                 {
-                    setText(((Skill) value).getName());
+                    setText(value == Skill.RUNECRAFT ? "Runecrafting" : ((Skill) value).getName());
                 }
                 if (iconSkill != null) setIcon(new ImageIcon(icons.getSkillImage(iconSkill, true)));
                 return this;
@@ -161,12 +178,9 @@ final class HcCalcsPanel extends PluginPanel
         showFilters.addActionListener(event -> filters.setVisible(showFilters.isSelected()));
         addLeft(trainingControls, labeled("Minimum XP/action", minimumXp));
         minimumXp.setEditor(new JSpinner.NumberEditor(minimumXp, UtilityCalculator.NUMBER_PATTERN));
-        minimumXp.setToolTipText("0 shows every recipe. Cooking uses XP per successful cook.");
         addLeft(trainingControls, showFilters);
         addLeft(filters, labeled("Category", category));
         addLeft(filters, labeled("Sort by", sort));
-        addLeft(filters, labeled("Level (0 = auto)", current));
-        current.setToolTipText("Uses your game level, or level 99 if unavailable.");
         addLeft(filters, onlyAvailable);
         addLeft(filters, labeled("Goal level (0 = off)", goal));
         addLeft(filters, labeled("Min. 24h volume", minimumVolume));
@@ -183,6 +197,41 @@ final class HcCalcsPanel extends PluginPanel
         cookingOptions.add(labeled("Cooking method", kitchen));
         cookingOptions.add(gauntlets);
         addLeft(filters, cookingOptions);
+        runecraftOptions.setLayout(new BoxLayout(runecraftOptions, BoxLayout.Y_AXIS));
+        essencePerAltarUse.setToolTipText("Loose essence slots before packing pouches. Each pouch takes one slot.");
+        addLeft(runecraftOptions, labeled("Base essence slots", essencePerAltarUse));
+        addLeft(runecraftOptions, new JLabel("Essence pouches"));
+        JPanel pouchOptions = new JPanel(new GridLayout(0, 2, 3, 0));
+        for (EssencePouch pouch : EssencePouch.values())
+        {
+            JCheckBox box = new JCheckBox(pouch.label);
+            box.setToolTipText(pouch == EssencePouch.COLOSSAL ? "Replaces other pouches. Capacity scales with level."
+                : pouch.capacityAt(99) + " essence. Requires level " + pouch.level + ".");
+            box.addActionListener(event ->
+            {
+                refreshPouchOptions();
+                changed(pouchSetting(pouch), box.isSelected());
+            });
+            essencePouches.put(pouch, box);
+            pouchOptions.add(box);
+        }
+        pouchOptions.setMaximumSize(new Dimension(Integer.MAX_VALUE, pouchOptions.getPreferredSize().height));
+        addLeft(runecraftOptions, pouchOptions);
+        addLeft(filters, runecraftOptions);
+
+        runsPerHour.setEditor(new JSpinner.NumberEditor(runsPerHour, UtilityCalculator.NUMBER_PATTERN));
+        JPanel paceControl = new JPanel(new BorderLayout(3, 0));
+        paceControl.add(runsPerHour, BorderLayout.CENTER);
+        paceControl.add(resetRunecraftPace, BorderLayout.EAST);
+        resetRunecraftPace.setToolTipText("Restore this method's estimated runs and essence per run.");
+        JPanel essenceControl = new JPanel(new BorderLayout(3, 0));
+        essenceControl.add(essencePerRun, BorderLayout.CENTER);
+        essenceControl.add(autoEssencePerRun, BorderLayout.EAST);
+        autoEssencePerRun.setToolTipText("Use the estimated capacity for this method.");
+        runecraftPace.add(labeled("Runs per hour", paceControl));
+        runecraftPace.add(labeled("Essence per run", essenceControl));
+        runecraftPace.setMaximumSize(new Dimension(Integer.MAX_VALUE, runecraftPace.getPreferredSize().height));
+        addLeft(trainingControls, runecraftPace);
 
         JPanel priceControls = new JPanel(new BorderLayout(4, 0));
         priceControls.setBorder(BorderFactory.createEmptyBorder(4, 0, 8, 0));
@@ -191,6 +240,7 @@ final class HcCalcsPanel extends PluginPanel
         priceControls.setMaximumSize(new Dimension(Integer.MAX_VALUE, priceControls.getPreferredSize().height));
         addLeft(priceControls);
 
+        addLeft(progressInput);
         addLeft(trainingControls);
         addLeft(trainingResults);
         addLeft(trainingResults, bestRate);
@@ -199,7 +249,8 @@ final class HcCalcsPanel extends PluginPanel
         XpResults.Cell resultCell = new XpResults.Cell();
         results.setCellRenderer((list, row, index, selected, focused) -> resultCell.render(list, row.recipe.name,
             "Lvl " + row.recipe.level + "  ·  " + fmt(row.recipe.xp)
-                + (row.recipe.range == null ? " XP" : " XP/cooked"), -row.result.gpPerXp, selected, focused));
+                + (row.recipe.runecraft != null ? " XP/essence" : row.recipe.range == null ? " XP" : " XP/cooked"),
+            -row.result.gpPerXp, selected, focused));
         JScrollPane scroll = new JScrollPane(results, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
             JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
         results.setFixedCellHeight(XpResults.ROW_HEIGHT);
@@ -236,7 +287,6 @@ final class HcCalcsPanel extends PluginPanel
         category.addActionListener(event -> changed("category", category.getSelectedItem()));
         sort.addActionListener(event -> changed("sort", sort.getSelectedIndex()));
         onlyAvailable.addActionListener(event -> changed("availableOnly", onlyAvailable.isSelected()));
-        current.addChangeListener(event -> changed("current", current.getValue()));
         goal.addChangeListener(event -> changed("goal", goal.getValue()));
         minimumXp.addChangeListener(event -> changed("minXp", minimumXp.getValue()));
         minimumVolume.addChangeListener(event -> changed("minVolume", minimumVolume.getValue()));
@@ -244,6 +294,25 @@ final class HcCalcsPanel extends PluginPanel
         goggles.addActionListener(event -> changed("goggles", goggles.isSelected()));
         kitchen.addActionListener(event -> changed("kitchen", kitchen.getSelectedItem()));
         gauntlets.addActionListener(event -> changed("gauntlets", gauntlets.isSelected()));
+        essencePerAltarUse.addChangeListener(event -> changed("essencePerUse", essencePerAltarUse.getValue()));
+        runsPerHour.addChangeListener(event -> rememberRunecraftPace("runsPerHour", runsPerHour.getValue()));
+        essencePerRun.addChangeListener(event -> rememberRunecraftPace("essencePerRun", essencePerRun.getValue()));
+        autoEssencePerRun.addActionListener(event ->
+        {
+            Row row = results.getSelectedValue();
+            if (row == null || row.recipe.runecraft == null) return;
+            config.unsetConfiguration(CONFIG_GROUP, runecraftPaceKey(row.recipe) + "essencePerRun");
+            showDetails();
+        });
+        resetRunecraftPace.addActionListener(event ->
+        {
+            Row row = results.getSelectedValue();
+            if (row == null || row.recipe.runecraft == null) return;
+            String prefix = runecraftPaceKey(row.recipe);
+            config.unsetConfiguration(CONFIG_GROUP, prefix + "runsPerHour");
+            config.unsetConfiguration(CONFIG_GROUP, prefix + "essencePerRun");
+            showDetails();
+        });
         results.addListSelectionListener(event -> showDetails());
         refresh.addActionListener(event -> fetchPrices(true));
         sell.addActionListener(event ->
@@ -327,6 +396,14 @@ final class HcCalcsPanel extends PluginPanel
     private void configureSelection()
     {
         UtilityCalculator utility = selectedUtility();
+        boolean showsProgress = utility == null || utility.hasTrainingProgress();
+        progressInput.setVisible(showsProgress);
+        if (showsProgress)
+        {
+            Skill selected = utility == null ? selectedSkill() : utility.skill;
+            progressInput.configure(utility == null ? key(selected) : utility.id, utility == null ? "current" : "level",
+                () -> resolveProgress(selected, null).xp);
+        }
         trainingControls.setVisible(utility == null);
         trainingResults.setVisible(utility == null);
         utilities.setVisible(utility != null);
@@ -360,7 +437,6 @@ final class HcCalcsPanel extends PluginPanel
         category.setSelectedItem(setting("category", String.class, ALL));
         sort.setSelectedIndex(Math.max(0, Math.min(sort.getItemCount() - 1, setting("sort", int.class, 1))));
         onlyAvailable.setSelected(setting("availableOnly", boolean.class, true));
-        current.setValue(setting("current", int.class, 0));
         goal.setValue(setting("goal", int.class, 0));
         minimumXp.setValue(setting("minXp", double.class, 0.0));
         minimumVolume.setValue(setting("minVolume", int.class, 0));
@@ -370,6 +446,17 @@ final class HcCalcsPanel extends PluginPanel
         gauntlets.setSelected(setting("gauntlets", boolean.class, false));
         herbloreOptions.setVisible(selectedSkill() == Skill.HERBLORE);
         cookingOptions.setVisible(selectedSkill() == Skill.COOKING);
+        runecraftOptions.setVisible(selectedSkill() == Skill.RUNECRAFT);
+        runecraftPace.setVisible(selectedSkill() == Skill.RUNECRAFT);
+        if (selectedSkill() == Skill.RUNECRAFT)
+        {
+            int batch = setting("essencePerUse", int.class, RunecraftRecipes.DEFAULT_ESSENCE_PER_USE);
+            essencePerAltarUse.setValue(Math.max(1, Math.min(28, batch)));
+            essencePouches.forEach((pouch, box) -> box.setSelected(setting(pouchSetting(pouch), boolean.class, false)));
+            refreshPouchOptions();
+        }
+        minimumXp.setToolTipText(selectedSkill() == Skill.RUNECRAFT ? "Filters by XP per essence or fragment."
+            : "0 shows every recipe. Cooking uses XP per successful cook.");
         restoring = false;
         if (timer.isRunning())
         {
@@ -417,8 +504,27 @@ final class HcCalcsPanel extends PluginPanel
     private RecipeCatalog catalog() { return catalogs.get(key(selectedSkill())); }
     private Settings trainingSettings()
     {
+        int essencePerUse = selectedSkill() == Skill.RUNECRAFT ? runecraftLoad().loose : integer(essencePerAltarUse);
         return new Settings((Amulet) amulet.getSelectedItem(), goggles.isSelected(),
-            (Kitchen) kitchen.getSelectedItem(), gauntlets.isSelected());
+            (Kitchen) kitchen.getSelectedItem(), gauntlets.isSelected(), essencePerUse);
+    }
+
+    private PouchLoad runecraftLoad()
+    {
+        EnumSet<EssencePouch> selected = EnumSet.noneOf(EssencePouch.class);
+        essencePouches.forEach((pouch, box) -> { if (box.isSelected()) selected.add(pouch); });
+        return RunecraftRecipes.pouchLoad(currentLevel(), integer(essencePerAltarUse), selected);
+    }
+
+    private void refreshPouchOptions()
+    {
+        boolean colossal = essencePouches.get(EssencePouch.COLOSSAL).isSelected();
+        essencePouches.forEach((pouch, box) -> box.setEnabled(pouch == EssencePouch.COLOSSAL || !colossal));
+    }
+
+    private static String pouchSetting(EssencePouch pouch)
+    {
+        return "pouch." + pouch.name().toLowerCase(Locale.ROOT);
     }
 
     private static String key(Skill skill) { return skill.name().toLowerCase(Locale.ROOT); }
@@ -426,11 +532,17 @@ final class HcCalcsPanel extends PluginPanel
 
     private int currentLevel()
     {
-        if (integer(current) != 0)
-        {
-            return integer(current);
-        }
-        return levels.getOrDefault(selectedSkill(), UtilityCalculator.DEFAULT_LEVEL);
+        return currentProgress().level;
+    }
+
+    private SkillProgress currentProgress()
+    {
+        return resolveProgress(selectedSkill(), progressInput.exactXp());
+    }
+
+    private SkillProgress resolveProgress(Skill skill, Integer exactXp)
+    {
+        return SkillProgress.resolve(progressInput.level(), exactXp, levels.get(skill), experience.get(skill));
     }
 
     private void renderRows()
@@ -452,14 +564,17 @@ final class HcCalcsPanel extends PluginPanel
             return;
         }
         Row selected = keepSelection ? results.getSelectedValue() : null;
-        int level = currentLevel();
+        SkillProgress progress = currentProgress();
+        int level = progress.level;
+        int magic = levels.getOrDefault(Skill.MAGIC, UtilityCalculator.DEFAULT_LEVEL);
         Settings settings = trainingSettings();
         double xp = ((Number) minimumXp.getValue()).doubleValue();
         int tradeVolume = integer(minimumVolume);
         List<Row> eligible = new ArrayList<>();
         for (Recipe recipe : catalog().rows)
         {
-            if ((onlyAvailable.isSelected() && recipe.level > level) || recipe.xp < xp ||
+            boolean levelLocked = recipe.level > level || recipe.runecraft != null && recipe.runecraft.magicLevel > magic;
+            if ((onlyAvailable.isSelected() && levelLocked) || recipe.xp < xp ||
                 (!ALL.equals(category.getSelectedItem()) && !recipe.category.equals(category.getSelectedItem())))
             {
                 continue;
@@ -497,9 +612,7 @@ final class HcCalcsPanel extends PluginPanel
             results.setSelectedIndex(0);
             results.ensureIndexIsVisible(0);
         }
-        String levelLabel = integer(current) > 0 ? "Level "
-            : levels.containsKey(selectedSkill()) ? "Game level " : "Assumed level ";
-        resultsStatus.setText(levelLabel + level + " · " + eligible.size() + " recipes");
+        resultsStatus.setText(progress.levelLabel + " · " + eligible.size() + " recipes");
         if (tradeVolume > 0)
         {
             resultsStatus.setToolTipText(volume == MarketSnapshot.EMPTY
@@ -509,7 +622,8 @@ final class HcCalcsPanel extends PluginPanel
         }
         else
         {
-            resultsStatus.setToolTipText(null);
+            resultsStatus.setToolTipText(selectedSkill() == Skill.RUNECRAFT
+                ? "Base rune yields per essence. Outfit bonuses and travel costs are excluded." : null);
         }
         showDetails();
     }
@@ -517,6 +631,7 @@ final class HcCalcsPanel extends PluginPanel
     private void showDetails()
     {
         Row row = results.getSelectedValue();
+        configureRunecraftPace(row == null ? null : row.recipe);
         if (row == null)
         {
             sell.setEnabled(false);
@@ -527,8 +642,13 @@ final class HcCalcsPanel extends PluginPanel
         }
         Recipe recipe = row.recipe;
         Result result = row.result;
+        boolean runecraft = recipe.runecraft != null;
         StringBuilder summary = new StringBuilder(recipe.name).append("\n")
-            .append(fmt(recipe.xp)).append(" XP/action\n");
+            .append(fmt(recipe.xp)).append(runecraft ? " XP/essence\n" : " XP/action\n");
+        if (runecraft)
+        {
+            summary.append(fmt(result.outputs.get(0).quantity())).append(" runes made per essence\n");
+        }
         if (recipe.range != null)
         {
             summary.append("Burn rate ")
@@ -537,7 +657,19 @@ final class HcCalcsPanel extends PluginPanel
         }
         summary.append("Buy cost ").append(gp(result.cost)).append("\n")
             .append("Net sale ").append(gp(result.netSale)).append("\n")
-            .append("Profit/action ").append(gp(result.netSale * result.success - result.cost)).append("\n");
+            .append(runecraft ? "Profit/essence " : "Profit/action ")
+            .append(gp(result.netSale * result.success - result.cost)).append("\n");
+        if (runecraft && !recipe.runecraft.note.isEmpty())
+        {
+            summary.append(recipe.runecraft.note).append("\n");
+        }
+        if (runecraft)
+        {
+            RunecraftHourly hourly = TrainingCalculator.runecraftHourly(recipe, result, runecraftLoad().loose,
+                integer(essencePerRun), ((Number) runsPerHour.getValue()).doubleValue());
+            summary.append("\nPer hour\n").append(fmt(hourly.xp)).append(" XP · ")
+                .append(fmt(hourly.runes)).append(" runes\nNet profit ").append(gp(hourly.profit)).append("\n");
+        }
         if (selectedSkill() == Skill.SMITHING && recipe.category.equals("Blast Furnace"))
         {
             summary.append("Excludes Blast Furnace fees.\n");
@@ -545,12 +677,12 @@ final class HcCalcsPanel extends PluginPanel
         int target = integer(goal);
         if (target > 0)
         {
-            Goal plan = TrainingCalculator.goal(recipe, result, trainingSettings(), currentLevel(),
-                integer(current) == 0 ? experience.get(selectedSkill()) : null, target);
+            SkillProgress progress = currentProgress();
+            Goal plan = TrainingCalculator.goal(recipe, result, trainingSettings(), progress.level, progress.xp, target);
             summary.append("\nTo level ").append(target).append("\n");
             if (plan != null)
             {
-                summary.append(fmt(plan.attempts)).append(" actions\n")
+                summary.append(fmt(plan.attempts)).append(runecraft ? " essence\n" : " actions\n")
                     .append("Buy ").append(gp(plan.gross)).append("\n")
                     .append("Net cost ").append(gp(plan.net)).append("\n");
             }
@@ -559,11 +691,20 @@ final class HcCalcsPanel extends PluginPanel
                 summary.append("Goal unavailable at this level\n");
             }
         }
-        summary.append("\nIngredients\n");
-        for (Item item : result.inputs)
+        summary.append(runecraft ? "\nIngredients per essence\n" : "\nIngredients\n");
+        for (Item item : runecraft ? recipe.inputs : result.inputs)
         {
             summary.append(fmt(item.quantity())).append(" × ").append(item.name()).append(" · ")
                 .append(item.id() == null ? "Self-gathered" : gp(market.buy(item.id())) + " each").append("\n");
+        }
+        if (runecraft && !recipe.runecraft.perUse.isEmpty())
+        {
+            summary.append("\nPer altar use of ").append(runecraftLoad().loose).append(" essence\n");
+            for (Item item : recipe.runecraft.perUse)
+            {
+                summary.append(item.quantity() < 1 ? "1/16" : fmt(item.quantity())).append(" × ").append(item.name())
+                    .append(" · ").append(gp(market.buy(item.id()))).append(" each\n");
+            }
         }
         summary.append("\nOutputs\n");
         boolean canEdit = false;
@@ -576,6 +717,44 @@ final class HcCalcsPanel extends PluginPanel
         details.setText(summary.toString());
         details.setCaretPosition(0);
         sell.setEnabled(canEdit);
+    }
+
+    private void configureRunecraftPace(Recipe recipe)
+    {
+        boolean selected = recipe != null && recipe.runecraft != null;
+        runsPerHour.setEnabled(selected);
+        essencePerRun.setEnabled(selected);
+        autoEssencePerRun.setEnabled(false);
+        resetRunecraftPace.setEnabled(selected);
+        if (!selected) return;
+
+        String prefix = runecraftPaceKey(recipe);
+        Double savedRate = config.getConfiguration(CONFIG_GROUP, prefix + "runsPerHour", double.class);
+        Integer savedEssence = config.getConfiguration(CONFIG_GROUP, prefix + "essencePerRun", int.class);
+        double defaultRate = recipe.runecraft.defaultRunsPerHour;
+        int defaultEssence = recipe.runecraft.defaultEssencePerRun(runecraftLoad().total);
+        boolean manualEssence = savedEssence != null && savedEssence >= 1 && savedEssence <= 1000;
+        restoringRunecraftPace = true;
+        runsPerHour.setValue(savedRate != null && savedRate >= 0.1 && savedRate <= 3600 ? savedRate : defaultRate);
+        essencePerRun.setValue(manualEssence ? savedEssence : defaultEssence);
+        restoringRunecraftPace = false;
+        autoEssencePerRun.setEnabled(manualEssence);
+        essencePerRun.setToolTipText((manualEssence ? "Manual value. Auto estimates " : "Estimated capacity is ")
+            + defaultEssence + " essence per trip.");
+        runsPerHour.setToolTipText("Estimated starting pace: " + fmt(defaultRate) + " full trips per hour.");
+    }
+
+    private void rememberRunecraftPace(String setting, Object value)
+    {
+        Row row = results.getSelectedValue();
+        if (restoringRunecraftPace || row == null || row.recipe.runecraft == null) return;
+        remember(runecraftPaceKey(row.recipe) + setting, value);
+        showDetails();
+    }
+
+    private static String runecraftPaceKey(Recipe recipe)
+    {
+        return "runecraft." + recipe.outputs.get(0).id() + (recipe.selfGatheredFree ? ".arceuus." : ".");
     }
 
     private void editSale(List<Item> outputs)

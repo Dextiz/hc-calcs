@@ -30,7 +30,8 @@ import okhttp3.OkHttpClient;
 )
 public class HcCalcsPlugin extends Plugin
 {
-    static final Skill[] SKILLS = {Skill.HERBLORE, Skill.COOKING, Skill.FLETCHING, Skill.SMITHING, Skill.CRAFTING};
+    static final Skill[] SKILLS = {Skill.HERBLORE, Skill.COOKING, Skill.FLETCHING, Skill.SMITHING, Skill.CRAFTING,
+        Skill.RUNECRAFT};
 
     @Inject private Client client;
     @Inject private ClientThread clientThread;

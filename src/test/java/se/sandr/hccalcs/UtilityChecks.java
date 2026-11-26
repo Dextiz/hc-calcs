@@ -83,6 +83,10 @@ final class UtilityChecks
         close(dragon.xp, 348, "Sunfire XP");
         close(dragon.cost, 3149.35, "Average sunfire supplies");
         require(dragon.detail.contains("48,090 GP"), "Whole jugs and splinters for the goal");
+        Values exactPrayer = new Values(sunfire.input, Map.of(Skill.PRAYER, 99), Map.of(),
+            Experience.getXpForLevel(60) - 5000);
+        require(find(prayer.calculate(exactPrayer, market), "Dragon bones").detail.contains("48,090 GP"),
+            "Exact Prayer XP overrides level and determines the goal cost");
 
         UtilityCalculator farming = calculators.get("farming");
         Map<String, Object> farmOptions = Map.ofEntries(Map.entry("patches", 6), Map.entry("hosidius", true),
@@ -95,6 +99,10 @@ final class UtilityChecks
         close(ranarr.xp, 340.2079525723587, "Farming herb run XP");
         close(ranarr.cost, 1006.6044992154586, "Farming herb run costs");
         close(ranarr.outputs.get(0).quantity(), 9.10517877286422, "Expected herb harvest and resurrection");
+        Values exactFarm = new Values(farm.input, Map.of(Skill.FARMING, 1, Skill.MAGIC, 85), Map.of(),
+            Experience.getXpForLevel(75));
+        close(find(farming.calculate(exactFarm, market), "Ranarr").outputs.get(0).quantity(),
+            ranarr.outputs.get(0).quantity(), "Exact Farming XP controls unlocks and harvest yield");
         close(cabbage.outputs.get(0).quantity(), 22.26086956521739, "Average allotment harvest");
         close(cabbage.cost, 380, "Allotment protection and bottomless compost");
         Values assumedFarm = settings(farming, Map.of("resurrect", true), Map.of(), Map.of());

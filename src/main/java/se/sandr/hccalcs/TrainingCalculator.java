@@ -55,13 +55,20 @@ final class TrainingCalculator
         final boolean goggles;
         final Kitchen kitchen;
         final boolean gauntlets;
+        final int essencePerAltarUse;
 
         Settings(Amulet amulet, boolean goggles, Kitchen kitchen, boolean gauntlets)
+        {
+            this(amulet, goggles, kitchen, gauntlets, RunecraftRecipes.DEFAULT_ESSENCE_PER_USE);
+        }
+
+        Settings(Amulet amulet, boolean goggles, Kitchen kitchen, boolean gauntlets, int essencePerAltarUse)
         {
             this.amulet = amulet;
             this.goggles = goggles;
             this.kitchen = kitchen;
             this.gauntlets = gauntlets;
+            this.essencePerAltarUse = essencePerAltarUse;
         }
     }
 
@@ -73,8 +80,10 @@ final class TrainingCalculator
         final double netSale;
         final double success;
         final double gpPerXp;
+        final double altarUseCost;
 
-        Result(List<Item> inputs, List<Item> outputs, double cost, double netSale, double success, double gpPerXp)
+        Result(List<Item> inputs, List<Item> outputs, double cost, double netSale, double success, double gpPerXp,
+            double altarUseCost)
         {
             this.inputs = inputs;
             this.outputs = outputs;
@@ -82,6 +91,7 @@ final class TrainingCalculator
             this.netSale = netSale;
             this.success = success;
             this.gpPerXp = gpPerXp;
+            this.altarUseCost = altarUseCost;
         }
     }
 
@@ -96,6 +106,20 @@ final class TrainingCalculator
             this.attempts = attempts;
             this.gross = gross;
             this.net = net;
+        }
+    }
+
+    static final class RunecraftHourly
+    {
+        final double xp;
+        final double runes;
+        final double profit;
+
+        RunecraftHourly(double xp, double runes, double profit)
+        {
+            this.xp = xp;
+            this.runes = runes;
+            this.profit = profit;
         }
     }
 
@@ -115,6 +139,19 @@ final class TrainingCalculator
         }
 
         List<Item> outputs = recipe.outputs;
+        double altarUseCost = 0;
+        if (recipe.runecraft != null)
+        {
+            for (Item item : recipe.runecraft.perUse)
+            {
+                inputs.add(new Item(item.id(), item.name(), item.quantity() / settings.essencePerAltarUse));
+                altarUseCost += market.buy(item.id()) * item.quantity();
+            }
+            cost += altarUseCost / settings.essencePerAltarUse;
+            Item output = outputs.get(0);
+            int outputLevel = level == null ? recipe.level : level;
+            outputs = List.of(new Item(output.id(), output.name(), recipe.runecraft.runesPerEssence(outputLevel)));
+        }
         Amulet amulet = settings.amulet;
         if (recipe.amulet && amulet != Amulet.NONE)
         {
@@ -136,7 +173,7 @@ final class TrainingCalculator
         double success = success(recipe, settings, level);
         double gpPerXp = recipe.xp > 0 && success > 0
             ? (netSale * success - cost) / (recipe.xp * success) : Double.NaN;
-        return new Result(inputs, outputs, cost, netSale, success, gpPerXp);
+        return new Result(inputs, outputs, cost, netSale, success, gpPerXp, altarUseCost);
     }
 
     static double salePrice(Integer id, MarketSnapshot market, Map<Integer, Long> overrides)
@@ -156,6 +193,21 @@ final class TrainingCalculator
             result.outputs.stream().allMatch(item -> volume.sell(item.id()) >= threshold);
     }
 
+    static RunecraftHourly runecraftHourly(Recipe recipe, Result result, int essencePerUse,
+        int essencePerRun, double runsPerHour)
+    {
+        double essencePerHour = essencePerRun * runsPerHour;
+        double profitPerRun = result.netSale * essencePerRun - runecraftCost(result, essencePerUse, essencePerRun);
+        return new RunecraftHourly(recipe.xp * essencePerHour, result.outputs.get(0).quantity() * essencePerHour,
+            profitPerRun * runsPerHour);
+    }
+
+    private static double runecraftCost(Result result, int essencePerUse, long essence)
+    {
+        long altarUses = (essence + essencePerUse - 1) / essencePerUse;
+        return essence * (result.cost - result.altarUseCost / essencePerUse) + altarUses * result.altarUseCost;
+    }
+
     static Goal goal(Recipe recipe, Result result, Settings settings, Integer level, Integer currentXp, int target)
     {
         if (level == null || target <= level || level < recipe.level || recipe.xp <= 0)
@@ -169,6 +221,13 @@ final class TrainingCalculator
             return null;
         }
         long products = (long) Math.ceil(remaining / recipe.xp);
+        if (recipe.runecraft != null)
+        {
+            int essencePerUse = settings.essencePerAltarUse;
+            long runes = recipe.runecraft.goalRunes(level, xp, recipe.xp, products, essencePerUse);
+            double gross = runecraftCost(result, essencePerUse, products);
+            return new Goal(products, gross, gross - runes * result.netSale / result.outputs.get(0).quantity());
+        }
         long attempts = products;
         if (recipe.range != null)
         {

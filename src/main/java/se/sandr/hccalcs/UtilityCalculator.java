@@ -70,6 +70,7 @@ abstract class UtilityCalculator
     abstract List<Row> calculate(Values values, Market market);
     boolean volumeNeeded(Values values) { return false; }
     boolean showsXp(Values values) { return values.input.containsKey("minXp"); }
+    boolean hasTrainingProgress() { return fields.stream().anyMatch(field -> field.id.equals("level")); }
     String actionLabel(Values values, Row row, Market market) { return null; }
     void perform(UtilityPanel panel) { }
 
@@ -111,7 +112,7 @@ abstract class UtilityCalculator
 
     void trainingFields()
     {
-        number("level", skill.getName() + " (0 = auto)", 0, 0, 99);
+        number("level", "", 0, 0, Experience.MAX_REAL_LEVEL);
         flag("only", "Only show unlocked", true);
         number("goal", "Goal level (0 = off)", 0, 0, 99);
         xpFilter();
@@ -132,7 +133,7 @@ abstract class UtilityCalculator
 
     boolean trainingAllowed(Values values, Market market, int level, double xp, List<Item> inputs, List<Item> outputs)
     {
-        int current = values.level(skill, "level");
+        int current = values.trainingProgress(skill).level;
         int volume = values.integer("volume");
         return (!values.flag("only") || current >= level)
             && allowsXp(values, xp)
@@ -144,15 +145,13 @@ abstract class UtilityCalculator
 
     long goalActions(Values values, int required, double xp)
     {
-        int level = values.level(skill, "level");
+        SkillProgress progress = values.trainingProgress(skill);
         int target = values.integer("goal");
-        if (level < required || target <= level || !(xp > 0))
+        if (progress.level < required || target <= progress.level || !(xp > 0))
         {
             return 0;
         }
-        int start = values.integer("level") == 0
-            ? values.xp.getOrDefault(skill, Experience.getXpForLevel(level)) : Experience.getXpForLevel(level);
-        return Math.max(0, (long) Math.ceil((Experience.getXpForLevel(target) - start) / xp));
+        return Math.max(0, (long) Math.ceil((Experience.getXpForLevel(target) - progress.xp) / xp));
     }
 
     static Comparator<Row> metric(ToDoubleFunction<Row> score, boolean descending)
@@ -348,12 +347,24 @@ abstract class UtilityCalculator
     {
         final Map<String, Object> input;
         final Map<Skill, Integer> levels, xp;
+        private final Integer exactXp;
 
         Values(Map<String, Object> input, Map<Skill, Integer> levels, Map<Skill, Integer> xp)
+        {
+            this(input, levels, xp, null);
+        }
+
+        Values(Map<String, Object> input, Map<Skill, Integer> levels, Map<Skill, Integer> xp, Integer exactXp)
         {
             this.input = new LinkedHashMap<>(input);
             this.levels = levels;
             this.xp = xp;
+            this.exactXp = exactXp;
+        }
+
+        SkillProgress trainingProgress(Skill skill)
+        {
+            return SkillProgress.resolve(integer("level"), exactXp, levels.get(skill), xp.get(skill));
         }
 
         int integer(String field) { return ((Number) input.get(field)).intValue(); }

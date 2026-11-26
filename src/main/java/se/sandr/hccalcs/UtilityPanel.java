@@ -206,7 +206,8 @@ final class UtilityPanel extends JPanel
         {
             saved.put(field.id, field.parse(config.getConfiguration("hccalcs", calculator.id + "." + field.id)));
         }
-        return new Values(saved, levels, xp);
+        Integer exactXp = calculator.hasTrainingProgress() ? SkillProgressInput.savedExactXp(config, calculator.id) : null;
+        return new Values(saved, levels, xp, exactXp);
     }
 
     void store(Map<String, ?> updates)
@@ -260,7 +261,7 @@ final class UtilityPanel extends JPanel
                 if (current instanceof Double)
                     spinner.setEditor(new JSpinner.NumberEditor(spinner, UtilityCalculator.NUMBER_PATTERN));
                 spinner.addChangeListener(event -> changed(field, spinner.getValue()));
-                if (field.id.equals("level") || field.id.equals("magic"))
+                if (field.id.equals("magic"))
                     spinner.setToolTipText("0 uses your game level, or level 99 if unavailable.");
                 if (field.id.equals("minXp"))
                 {
@@ -314,11 +315,10 @@ final class UtilityPanel extends JPanel
         results.setFixedCellHeight(showXp ? XpResults.ROW_HEIGHT : 26);
         List<Row> available = calculator instanceof CombatCalculator && combatLoadout != null
             ? ((CombatCalculator) calculator).calculate(values, market, combatLoadout) : calculator.calculate(values, market);
-        boolean assumedTraining = values.input.containsKey("level") && values.integer("level") == 0
-            && !values.levels.containsKey(calculator.skill);
         boolean assumedCombat = calculator instanceof CombatCalculator && combatLoadout == null
             && (!values.levels.containsKey(Skill.MAGIC) || !values.levels.containsKey(Skill.RANGED));
-        String status = assumedTraining || assumedCombat ? "Auto uses 99 · " : "";
+        String status = calculator.hasTrainingProgress() ? values.trainingProgress(calculator.skill).levelLabel + " · "
+            : assumedCombat ? "Auto uses 99 · " : "";
         count.setText(status + available.size() + " results");
         if (showXp)
         {
